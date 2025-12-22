@@ -1,0 +1,1136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NUTRITION</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    :root {
+      --bg: #000000;
+      --surface: #111111;
+      --surface-hover: #1a1a1a;
+      --text: #ffffff;
+      --text-muted: #666666;
+      --accent: #ffffff;
+      --border: #222222;
+      --font-main: 'Helvetica Neue', 'Arial', sans-serif;
+      --spacing: 20px;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: var(--font-main);
+      -webkit-font-smoothing: antialiased;
+      line-height: 1.5;
+    }
+    
+    input, select, textarea {
+      font-size: 16px !important;
+    }
+
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+      padding: var(--spacing);
+    }
+
+    header {
+      margin-bottom: 60px;
+      text-align: center;
+      padding-top: 40px;
+    }
+
+    h1 {
+      font-size: 1rem;
+      text-transform: uppercase;
+      letter-spacing: 4px;
+      font-weight: 600;
+    }
+
+    /* TABS */
+    .tabs {
+      display: flex;
+      justify-content: center;
+      gap: 40px;
+      margin-bottom: 40px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .tab {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      font-size: 0.75rem;
+      letter-spacing: 2px;
+      padding-bottom: 15px;
+      cursor: pointer;
+      transition: color 0.3s;
+    }
+
+    .tab.active {
+      color: var(--text);
+      border-bottom: 1px solid var(--text);
+    }
+
+    /* UPLOAD */
+    .upload-zone {
+      border: 1px dashed var(--border);
+      height: 250px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      cursor: pointer;
+      background: var(--surface);
+      background-size: contain;
+      background-repeat: no-repeat;
+      background-position: center;
+      position: relative;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .upload-zone:hover {
+      background-color: var(--surface-hover);
+      border-color: #444;
+    }
+
+    .upload-zone.has-image {
+        border-style: solid;
+    }
+
+    .upload-icon {
+        font-size: 2rem;
+        color: var(--text-muted);
+        margin-bottom: 10px;
+        transition: color 0.3s;
+    }
+    
+    .upload-zone:hover .upload-icon {
+        color: var(--text);
+    }
+
+    .upload-label {
+      text-transform: uppercase;
+      font-size: 0.7rem;
+      letter-spacing: 2px;
+      color: var(--text-muted);
+      z-index: 2;
+    }
+
+    /* STATS & PROGRESS */
+    .stats-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        padding: 30px;
+        margin-bottom: 30px;
+    }
+
+    .progress-container {
+        width: 100%;
+        height: 4px;
+        background: #222;
+        margin: 20px 0;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .progress-bar {
+        height: 100%;
+        background: #fff;
+        width: 0%;
+        transition: width 1s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .stats-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+        margin-top: 30px;
+    }
+
+    .stat-box {
+        border-left: 1px solid var(--border);
+        padding-left: 15px;
+    }
+
+    .stat-label {
+        font-size: 0.65rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 1.5px;
+        display: block;
+        margin-bottom: 5px;
+    }
+
+    .stat-value {
+        font-size: 1.2rem;
+        font-weight: 300;
+    }
+
+    .weekly-chart {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        height: 150px;
+        margin-top: 40px;
+        padding-bottom: 20px;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .day-column {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .day-bar-wrap {
+        width: 12px;
+        height: 100px;
+        background: #111;
+        position: relative;
+        border-radius: 2px;
+        overflow: hidden;
+    }
+
+    .day-bar {
+        position: absolute;
+        bottom: 0;
+        width: 100%;
+        background: #444;
+        transition: height 0.6s ease-out, background 0.3s;
+    }
+    
+    .day-bar.over { background: #622; }
+    .day-bar.today { background: #fff; }
+
+    .day-name {
+        font-size: 0.6rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+    }
+
+    /* SETTINGS */
+    .settings-group {
+        margin-bottom: 25px;
+    }
+
+    .settings-label {
+        display: block;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 1.5px;
+        color: var(--text-muted);
+        margin-bottom: 10px;
+    }
+
+    .settings-input {
+        width: 100%;
+        background: transparent;
+        border: 1px solid var(--border);
+        padding: 15px;
+        color: var(--text);
+        font-family: inherit;
+        outline: none;
+        transition: border-color 0.3s;
+    }
+
+    .settings-input:focus {
+        border-color: #666;
+    }
+
+    .btn-outline {
+        background: transparent;
+        border: 1px solid #333;
+        color: #888;
+        padding: 12px 20px;
+        text-transform: uppercase;
+        font-size: 0.7rem;
+        letter-spacing: 2px;
+        cursor: pointer;
+        transition: all 0.3s;
+    }
+
+    .btn-outline:hover {
+        border-color: #fff;
+        color: #fff;
+    }
+
+    /* HISTORY FEED */
+    .day-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-top: 60px;
+      margin-bottom: 20px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .day-title {
+      font-size: 1.2rem;
+      font-weight: 300;
+      letter-spacing: 1px;
+    }
+
+    .day-summary {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      font-family: monospace;
+    }
+
+    .entry-card {
+      margin-bottom: 40px;
+      opacity: 0;
+      animation: fadeIn 0.5s forwards;
+    }
+
+    .entry-time {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+      display: block;
+    }
+
+    .entry-main {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 15px;
+    }
+
+    .entry-info h3 {
+      font-size: 1rem;
+      font-weight: 400;
+      margin-bottom: 5px;
+    }
+    
+    .entry-user-msg {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      font-style: italic;
+    }
+
+    .entry-macros {
+      text-align: right;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .macro-row {
+        display: flex;
+        justify-content: flex-end;
+        align-items: baseline;
+        gap: 10px;
+    }
+
+    .macro-total {
+      font-size: 1.2rem;
+      font-weight: 300;
+      display: block;
+      width: 50px;
+      text-align: right;
+    }
+    
+    .macro-detail {
+        font-size: 0.7rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        text-align: right;
+        width: 40px; 
+    }
+
+    .entry-actions {
+      display: flex;
+      gap: 20px;
+      margin-top: 15px;
+    }
+
+    .action-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      cursor: pointer;
+      padding: 0;
+    }
+
+    .action-btn:hover { color: var(--text); }
+    .action-btn.delete { color: #522; }
+    .action-btn.delete:hover { color: #f44; }
+
+    /* DETAIL VIEW */
+    .detail-view {
+      display: none;
+      margin-top: 20px;
+      padding: 20px;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+    }
+    
+    .detail-content {
+      font-size: 0.9rem;
+      color: #ddd;
+      line-height: 1.6;
+    }
+
+    .detail-content p { margin-bottom: 10px; }
+
+    .chat-box {
+      margin-top: 20px;
+      border-top: 1px solid var(--border);
+      padding-top: 20px;
+    }
+    
+    .chat-input {
+      width: 100%;
+      background: transparent;
+      border: none;
+      border-bottom: 1px solid #333;
+      padding: 10px 0;
+      color: white;
+      font-family: inherit;
+      outline: none;
+    }
+    
+    .chat-input:focus { border-bottom-color: #666; }
+
+    /* UTILITIES */
+    .hidden { display: none; }
+    @keyframes fadeIn { to { opacity: 1; } }
+    
+    #loadingOverlay {
+        position: fixed; top:0; left:0; width:100%; height:100%;
+        background: rgba(0,0,0,0.8);
+        display: none;
+        align-items: center; justify-content: center;
+        z-index: 1000;
+    }
+    .spinner {
+        width: 40px; height: 40px; border: 2px solid #333; border-top-color: #fff;
+        border-radius: 50%; animation: spin 0.8s infinite linear;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+  </style>
+</head>
+<body>
+
+  <div id="loadingOverlay"><div class="spinner"></div></div>
+
+  <div class="container">
+    <header>
+      <h1>TRACKER</h1>
+    </header>
+
+    <div class="tabs">
+      <button class="tab active" onclick="switchView('track')">Track</button>
+      <button class="tab" onclick="switchView('stats'); loadStats()">Stats</button>
+      <button class="tab" onclick="switchView('history'); loadHistory()">History</button>
+    </div>
+
+    <!-- TRACK VIEW -->
+    <div id="trackView">
+      <div class="upload-zone" id="dropZone">
+        <div class="upload-icon">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>
+          </svg>
+        </div>
+        <span class="upload-label">Capture or Upload</span>
+        <input type="file" id="fileInput" hidden accept="image/*">
+      </div>
+      
+      <div style="margin-top: 20px;">
+        <input type="text" id="userMessage" placeholder="RICE BOWL WITH SALMON..." 
+               style="width: 100%; background: transparent; border: 1px solid #333; padding: 15px; color: white; outline: none;">
+      </div>
+
+      <button onclick="analyzeImage()" style="margin-top: 20px; width: 100%; padding: 20px; background: white; color: black; border: none; text-transform: uppercase; letter-spacing: 2px; font-weight: 600; cursor: pointer;">
+        Analyze
+      </button>
+
+      <button onclick="debugAnalyze()" style="margin-top: 10px; width: 100%; padding: 15px; background: transparent; color: #444; border: 1px solid #222; text-transform: uppercase; letter-spacing: 2px; font-size: 0.7rem; cursor: pointer;">
+        Debug (Use Static Response)
+      </button>
+    </div>
+
+    <!-- RESULT VIEW -->
+    <div id="resultView" class="hidden">
+      <div id="resultContent"></div>
+    </div>
+
+    <!-- STATS VIEW -->
+    <div id="statsView" class="hidden">
+      <!-- Injected via JS -->
+    </div>
+
+    <!-- SETTINGS VIEW -->
+    <div id="settingsView" class="hidden">
+      <div class="day-header" style="margin-top: 0;">
+          <span class="day-title">PROFILE CONFIG</span>
+          <button class="action-btn" onclick="switchView('stats')">BACK</button>
+      </div>
+      
+      <div class="settings-group">
+          <label class="settings-label">Weight</label>
+          <div style="display: flex; gap: 10px;">
+              <input type="number" id="setWeight" class="settings-input" placeholder="0">
+              <select id="setWeightUnit" class="settings-input" style="width: 100px;">
+                  <option value="lbs">LBS</option>
+                  <option value="kg">KG</option>
+              </select>
+          </div>
+      </div>
+
+      <div class="settings-group">
+          <label class="settings-label">Height</label>
+          <div style="display: flex; gap: 10px;">
+              <input type="number" id="setHeight" class="settings-input" placeholder="0">
+              <select id="setHeightUnit" class="settings-input" style="width: 100px;">
+                  <option value="in">IN</option>
+                  <option value="cm">CM</option>
+              </select>
+          </div>
+      </div>
+
+      <div class="settings-group">
+          <label class="settings-label">Age & Gender</label>
+          <div style="display: flex; gap: 10px;">
+              <input type="number" id="setAge" class="settings-input" placeholder="Age">
+              <select id="setGender" class="settings-input">
+                  <option value="male">MALE</option>
+                  <option value="female">FEMALE</option>
+              </select>
+          </div>
+      </div>
+
+      <div class="settings-group">
+          <label class="settings-label">Activity Level</label>
+          <select id="setActivity" class="settings-input">
+              <option value="sedentary">Sedentary (Office worker)</option>
+              <option value="light">Light (Exercise 1-3 days/week)</option>
+              <option value="moderate" selected>Moderate (Exercise 3-5 days/week)</option>
+              <option value="active">Active (Exercise 6-7 days/week)</option>
+              <option value="very_active">Very Active (Hard exercise/Physical job)</option>
+          </select>
+      </div>
+
+      <div class="settings-group" style="padding: 20px; background: #0a0a0a; border: 1px solid #1a1a1a;">
+          <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 15px;">
+              <label class="settings-label" style="margin-bottom: 0;">Maintenance Goal</label>
+              <button class="action-btn" onclick="calcTDEE()" style="color: #888;">AUTO-CALC</button>
+          </div>
+          <input type="number" id="setMaintenance" class="settings-input" placeholder="Daily Calorie Goal">
+      </div>
+
+      <button onclick="saveSettings()" style="width: 1000px; max-width: 100%; padding: 20px; background: white; color: black; border: none; text-transform: uppercase; letter-spacing: 2px; font-weight: 600; cursor: pointer; margin-top: 20px;">
+        Save Profile
+      </button>
+    </div>
+
+    <!-- HISTORY VIEW -->
+    <div id="historyView" class="hidden">
+      <!-- Injected via JS -->
+    </div>
+  </div>
+
+  <script>
+    const $ = id => document.getElementById(id);
+
+    // TABS
+    function switchView(viewName) {
+      document.querySelectorAll('.tab').forEach(t => {
+        t.classList.remove('active');
+        if (t.innerText.toLowerCase() === viewName.toLowerCase()) {
+            t.classList.add('active');
+        }
+      });
+      
+      $('trackView').classList.add('hidden');
+      $('historyView').classList.add('hidden');
+      $('resultView').classList.add('hidden');
+      $('statsView').classList.add('hidden');
+      $('settingsView').classList.add('hidden');
+      $(viewName + 'View').classList.remove('hidden');
+      window.scrollTo(0,0);
+    }
+
+    // UPLOAD
+    $('dropZone').onclick = () => $('fileInput').click();
+    $('dropZone').ondragover = (e) => { e.preventDefault(); $('dropZone').style.backgroundColor = '#222'; };
+    $('dropZone').ondragleave = () => { $('dropZone').style.backgroundColor = ''; };
+    $('dropZone').ondrop = (e) => {
+      e.preventDefault();
+      $('dropZone').style.backgroundColor = '';
+      if(e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+         // Create a new DataTransfer object to sync it to the input
+         const dt = new DataTransfer();
+         dt.items.add(e.dataTransfer.files[0]);
+         $('fileInput').files = dt.files;
+         handleFileSelect(e.dataTransfer.files[0]);
+      }
+    };
+    $('fileInput').onchange = () => {
+       if($('fileInput').files[0]) handleFileSelect($('fileInput').files[0]);
+    };
+    
+    function handleFileSelect(file) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            $('dropZone').style.backgroundImage = `url(${e.target.result})`;
+            $('dropZone').classList.add('has-image');
+            document.querySelector('.upload-label').style.display = 'none';
+            document.querySelector('.upload-icon').style.display = 'none';
+        };
+        reader.readAsDataURL(file);
+    }
+
+    // API
+    async function analyzeImage() {
+      const file = $('fileInput').files[0];
+      if(!file) {
+          console.error('SELECT AN IMAGE');
+          return;
+      }
+      
+      const formData = new FormData();
+      formData.append('image', file);
+      formData.append('message', $('userMessage').value);
+
+      $('loadingOverlay').style.display = 'flex';
+      
+      // Use the already selected file
+      const previewUrl = $('dropZone').style.backgroundImage.slice(5, -2);
+      
+      try {
+        const res = await fetch('/analyze', { method: 'POST', body: formData });
+        const data = await res.json();
+        
+        // Reset
+        $('fileInput').value = '';
+        $('userMessage').value = '';
+        $('dropZone').style.backgroundImage = '';
+        $('dropZone').classList.remove('has-image');
+        document.querySelector('.upload-label').style.display = 'flex';
+        document.querySelector('.upload-icon').style.display = 'flex';
+        document.querySelector('.upload-label').innerText = 'Capture or Upload';
+        
+        showResult(data, previewUrl);
+        
+      } catch(e) {
+        console.error('ERROR: ' + e.message);
+      } finally {
+        $('loadingOverlay').style.display = 'none';
+      }
+    }
+
+    async function debugAnalyze() {
+      $('loadingOverlay').style.display = 'flex';
+      try {
+        const res = await fetch('/debug', { method: 'POST' });
+        const data = await res.json();
+        
+        showResult(data, null);
+      } catch(e) {
+        console.error('ERROR: ' + e.message);
+      } finally {
+        $('loadingOverlay').style.display = 'none';
+      }
+    }
+    
+    function showResult(entry, previewUrl) {
+        $('trackView').classList.add('hidden');
+        $('historyView').classList.add('hidden');
+        $('resultView').classList.remove('hidden');
+        
+        const container = $('resultContent');
+        
+        let itemsHtml = '';
+        if(entry.items && entry.items.length > 0) {
+            itemsHtml += '<div style="margin-top: 30px; border-top: 1px solid #333; padding-top: 20px;">';
+            entry.items.forEach((item, index) => {
+                itemsHtml += `
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 0.9rem; opacity: 0; animation: fadeIn 0.5s forwards ${index * 0.1}s;">
+                        <span>${item.name}</span>
+                        <div style="text-align: right; display: flex; gap: 15px; justify-content: flex-end; min-width: 120px;">
+                           <span style="color: #fff; width: 50px; text-align: right;">${item.protein || 0}g P</span>
+                           <span style="color: #888; width: 60px; text-align: right;">${item.calories} CAL</span>
+                        </div>
+                    </div>
+                `;
+            });
+            itemsHtml += '</div>';
+        }
+
+        
+
+        container.innerHTML = `
+            <div class="day-header" style="margin-top: 0;">
+                <span class="day-title">ANALYSIS RESULT</span>
+            </div>
+            
+            
+
+            <div class="entry-card" style="opacity: 1; margin-top: 20px;">
+                 <div class="entry-main">
+                  <div class="entry-info">
+                    <h3 style="font-size: 1.4rem; margin-bottom: 10px;">${entry.meal_title || entry.user_message || 'Meal Analysis'}</h3>
+                  </div>
+                  <div class="entry-macros">
+                      <div class="macro-row">
+                          <span class="macro-detail">CAL</span>
+                          <span class="macro-total" style="font-size: 1.2rem;">${entry.total_calories || 0}</span>
+                      </div>
+                      <div class="macro-row">
+                          <span class="macro-detail">PROT</span>
+                          <span class="macro-total" style="font-size: 0.9rem; color: #aaa;">${entry.total_protein || 0}</span>
+                      </div>
+                  </div>
+                </div>
+                
+                ${itemsHtml}
+
+                <div class="detail-view" style="display: block; margin-top: 30px; padding: 20px; background: #1a1a1a; border-radius: 8px;">
+                    <div class="detail-content" style="padding: 10px;">
+                        ${marked.parse(entry.reasoning || '')}
+                    </div>
+                     <div class="chat-box">
+                        <input type="text" class="chat-input" placeholder="ASK FOLLOW UP..." 
+                               onkeypress="if(event.key === 'Enter') sendFollowup('${entry.id}', this)">
+                      </div>
+                </div>
+            </div>
+        `;
+    }
+
+    function closeResult() {
+        switchView('history'); 
+        loadHistory();
+        document.querySelectorAll('.tab')[1].click(); 
+    }
+
+    async function loadHistory() {
+      const res = await fetch('/history');
+      const entries = await res.json();
+      renderHistory(entries);
+    }
+
+    // STATS & SETTINGS
+    async function loadStats() {
+      const resp = await Promise.all([
+        fetch('/history'),
+        fetch('/settings')
+      ]);
+      const entries = await resp[0].json();
+      const settings = await resp[1].json();
+      renderStats(entries, settings);
+    }
+
+    function renderStats(entries, settings) {
+      const container = $('statsView');
+      const goal = settings.maintenance_calories || 2000;
+      
+      // Calculate Daily (Today)
+      const now = new Date();
+      const todayStr = now.toLocaleDateString();
+      const todayEntries = entries.filter(e => new Date(e.timestamp).toLocaleDateString() === todayStr);
+      const todayTotal = todayEntries.reduce((sum, e) => sum + (e.total_calories || 0), 0);
+      const remaining = Math.max(goal - todayTotal, 0);
+      const percent = Math.min(Math.round((todayTotal / goal) * 100), 100);
+
+      // Meal Group Breakdown for Progress Bar
+      const groups = { 'BREAKFAST': 0, 'LUNCH': 0, 'DINNER': 0, 'SNACK': 0 };
+      todayEntries.forEach(entry => {
+          const h = new Date(entry.timestamp).getHours();
+          if(h >= 4 && h < 11) groups['BREAKFAST'] += (entry.total_calories || 0);
+          else if(h >= 11 && h < 16) groups['LUNCH'] += (entry.total_calories || 0);
+          else if(h >= 16 && h < 22) groups['DINNER'] += (entry.total_calories || 0);
+          else groups['SNACK'] += (entry.total_calories || 0);
+      });
+
+      // Muted/Premium Colors
+      const colors = {
+          'BREAKFAST': '#E0E0E0', 
+          'LUNCH': '#9E9E9E',
+          'DINNER': '#616161',
+          'SNACK': '#333333'
+      };
+
+      let progressHtml = '';
+      ['BREAKFAST', 'LUNCH', 'DINNER', 'SNACK'].forEach(type => {
+          const val = groups[type];
+          if(val > 0) {
+              const p = (val / goal) * 100;
+              progressHtml += `<div style = "width: ${p}%; background: ${colors[type]}; height: 100%;" ></div> `;
+          }
+      });
+
+      // Calculate Weekly (Sun-Sat)
+      const startOfWeek = new Date(now);
+      startOfWeek.setDate(now.getDate() - now.getDay()); // Sunday
+      startOfWeek.setHours(0,0,0,0);
+      
+      const weeklyData = [0,0,0,0,0,0,0]; // Sun-Sat
+      entries.forEach(e => {
+          const d = new Date(e.timestamp);
+          if (d >= startOfWeek) {
+              const dayIndex = d.getDay();
+              weeklyData[dayIndex] += (e.total_calories || 0);
+          }
+      });
+
+      const weeklyTotal = weeklyData.reduce((a,b) => a+b, 0);
+      const daysPassed = now.getDay() + 1;
+      const runningGoal = goal * daysPassed;
+
+      // Chart Generation
+      let weeklyHtml = '';
+      const graphMax = goal * 1.4;
+      
+      ['S','M','T','W','T','F','S'].forEach((day, i) => {
+          const dayVal = weeklyData[i];
+          const h = (dayVal / graphMax) * 100;
+          const isToday = i === now.getDay();
+          const isOver = dayVal > goal;
+          
+          weeklyHtml += `
+      <div class="day-column" >
+                <div class="day-bar-wrap" style="height: 120px; position: relative;">
+                    <div class="day-bar ${isToday?'today':''} ${isOver?'over':''}" style="height: ${h}%"></div>
+                </div>
+                <span class="day-name">${day}</span>
+                </div>
+      `;
+      });
+
+      // Ceiling line %
+      const ceilingPct = (goal / graphMax) * 100;
+
+      container.innerHTML = `
+      <div class="stats-card" >
+            <div style="display: flex; justify-content: space-between; align-items: baseline;">
+                <span class="day-title">DAILY BUDGET</span>
+                <span class="day-summary">${Math.round(todayTotal)} / ${goal} CAL</span>
+            </div>
+            
+            <div class="progress-container" style="display: flex; background: #111;">
+                ${progressHtml}
+            </div>
+
+            <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
+                <div style="display:flex; gap:10px; font-size: 0.6rem; color: #666; text-transform: uppercase;">
+                    <span style="color:${colors.BREAKFAST}">Breakfast</span>
+                    <span style="color:${colors.LUNCH}">Lunch</span>
+                    <span style="color:${colors.DINNER}">Dinner</span>
+                    <span style="color:${colors.SNACK}">Snack</span>
+                </div>
+                <span class="stat-label">${Math.round(remaining)} REMAINING</span>
+            </div>
+
+            <div class="stats-grid">
+                <div class="stat-box">
+                    <span class="stat-label">WEEKLY CONSUMED</span>
+                    <span class="stat-value">${Math.round(weeklyTotal)} <span style="font-size: 0.8rem; color: #666;">/ ${runningGoal}</span></span>
+                </div>
+                <div class="stat-box" style="text-align: right; border-left: none; border-right: 1px solid var(--border); padding-right: 15px;">
+                    <span class="stat-label">AVG DAILY</span>
+                    <span class="stat-value">${Math.round(weeklyTotal / daysPassed)}</span>
+                </div>
+            </div>
+
+            <div class="weekly-chart" style="position: relative; height: auto; display: block; margin-top: 40px;">
+                 <div style="display: flex; align-items: flex-end; justify-content: space-between; height: 120px; position: relative;">
+                    <!-- Dashed Goal Line -->
+                    <div style="position: absolute; bottom: ${ceilingPct}%; left: 0; right: 0; border-top: 1px dashed #666; opacity: 0.5; pointer-events: none;"></div>
+                    ${weeklyHtml}
+                 </div>
+            </div>
+
+            <button class="btn-outline" style="width: 100%; margin-top: 40px;" onclick="loadSettings(); switchView('settings')">
+                Adjust Profile & Goal
+            </button>
+        </div>
+      `;
+    }
+
+    async function loadSettings() {
+        const res = await fetch('/settings');
+        const s = await res.json();
+        if (s.id) {
+            $('setWeight').value = s.weight || '';
+            $('setWeightUnit').value = s.weight_unit || 'lbs';
+            $('setHeight').value = s.height || '';
+            $('setHeightUnit').value = s.height_unit || 'in';
+            $('setAge').value = s.age || '';
+            $('setGender').value = s.gender || 'male';
+            $('setActivity').value = s.activity_level || 'moderate';
+            $('setMaintenance').value = s.maintenance_calories || '';
+        }
+    }
+
+    async function saveSettings() {
+        const data = {
+            weight: parseFloat($('setWeight').value),
+            weight_unit: $('setWeightUnit').value,
+            height: parseFloat($('setHeight').value),
+            height_unit: $('setHeightUnit').value,
+            age: parseInt($('setAge').value),
+            gender: $('setGender').value,
+            activity_level: $('setActivity').value,
+            maintenance_calories: parseInt($('setMaintenance').value)
+        };
+
+        const res = await fetch('/settings', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+        
+        if (res.ok) {
+            switchView('stats');
+            loadStats();
+        }
+    }
+
+    function calcTDEE() {
+        const w = parseFloat($('setWeight').value);
+        const h = parseFloat($('setHeight').value);
+        const a = parseInt($('setAge').value);
+        const g = $('setGender').value;
+        const act = $('setActivity').value;
+
+        if (!w || !h || !a) {
+            alert('Please fill in weight, height, and age first');
+            return;
+        }
+
+        // Convert to metric
+        let weightKg = $('setWeightUnit').value === 'lbs' ? w * 0.453592 : w;
+        let heightCm = $('setHeightUnit').value === 'in' ? h * 2.54 : h;
+
+        // Mifflin-St Jeor Equation
+        let bmr = (10 * weightKg) + (6.25 * heightCm) - (5 * a);
+        bmr += (g === 'male' ? 5 : -161);
+
+        const multipliers = {
+            sedentary: 1.2,
+            light: 1.375,
+            moderate: 1.55,
+            active: 1.725,
+            very_active: 1.9
+        };
+
+        const tdee = Math.round(bmr * (multipliers[act] || 1.2));
+        $('setMaintenance').value = tdee;
+    }
+
+    // RENDERING
+    function renderHistory(entries) {
+      const container = $('historyView');
+      container.innerHTML = '';
+      
+      // Group by Day
+      const grouped = {};
+      entries.forEach(e => {
+        const date = new Date(e.timestamp).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+        if(!grouped[date]) grouped[date] = [];
+        grouped[date].push(e);
+      });
+
+      let globalIndex = 0; // For staggered animation
+
+      for(const [date, dayEntries] of Object.entries(grouped)) {
+        const dayTotalCals = dayEntries.reduce((acc, curr) => acc + (curr.total_calories||0), 0);
+        const dayTotalProt = dayEntries.reduce((acc, curr) => acc + (curr.total_protein||0), 0);
+        
+        const dayDiv = document.createElement('div');
+        dayDiv.innerHTML = `
+          <div class="day-header">
+            <span class="day-title">${date.toUpperCase()}</span>
+            <span class="day-summary">${Math.round(dayTotalCals)} CALS / ${Math.round(dayTotalProt)}G PROT</span>
+          </div>
+        `;
+
+        // Sub-group by Meal Time logic
+        const mealGroups = { 'BREAKFAST': [], 'LUNCH': [], 'DINNER': [], 'SNACK': [] };
+        
+        dayEntries.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp)); // Newest first
+
+        dayEntries.forEach(entry => {
+          const time = new Date(entry.timestamp);
+          const hour = time.getHours();
+          if(hour >= 4 && hour < 11) mealGroups['BREAKFAST'].push(entry);
+          else if(hour >= 11 && hour < 16) mealGroups['LUNCH'].push(entry);
+          else if(hour >= 16 && hour < 22) mealGroups['DINNER'].push(entry);
+          else mealGroups['SNACK'].push(entry);
+        });
+
+        // Render groups
+        ['BREAKFAST', 'LUNCH', 'DINNER', 'SNACK'].forEach(mealType => {
+            const groupEntries = mealGroups[mealType];
+            if(groupEntries.length === 0) return;
+
+            const groupHeader = document.createElement('div');
+            groupHeader.style.cssText = "margin-top: 30px; margin-bottom: 15px; font-size: 0.8rem; letter-spacing: 2px; color: #666; padding-left: 10px; border-left: 2px solid #333;";
+            groupHeader.innerText = mealType;
+            dayDiv.appendChild(groupHeader);
+
+            groupEntries.forEach(entry => {
+                const time = new Date(entry.timestamp);
+                const title = entry.meal_title || entry.user_message || 'Meal Analysis'; // Use meal_title if available
+                
+                const card = document.createElement('div');
+                card.className = 'entry-card';
+                card.style.animationDelay = `${globalIndex * 0.1}s`;
+                globalIndex++;
+
+                card.innerHTML = `
+                  <div class="entry-main">
+                    <div class="entry-info">
+                      <h3 style="font-size: 1.1rem; margin-bottom: 5px;">${title}</h3>
+                      <span class="entry-user-msg" style="font-size: 0.75rem;">${time.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} // ${entry.items ? entry.items.length + ' Items' : ''}</span>
+                    </div>
+                    <div class="entry-macros">
+                        <div class="macro-row">
+                          <span class="macro-detail">CAL</span>
+                          <span class="macro-total" style="font-size: 1.2rem;">${entry.total_calories || 0}</span>
+                      </div>
+                      <div class="macro-row">
+                          <span class="macro-detail">PROT</span>
+                          <span class="macro-total" style="font-size: 0.9rem; color: #aaa;">${entry.total_protein || 0}</span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div class="entry-actions">
+                    <button class="action-btn" onclick="toggleDetails('${entry.id}', this)">Details</button>
+                    <button class="action-btn delete" onclick="deleteEntry('${entry.id}')">Delete</button>
+                  </div>
+                  
+                  <div id="detail-${entry.id}" class="detail-view">
+                    <div id="detail-items-${entry.id}" style="margin-bottom: 20px;"></div>
+                    <button onclick="toggleReasoning('${entry.id}')" style="background:none; border:none; color:#666; font-size: 0.7rem; letter-spacing:1px; cursor:pointer; margin-bottom:10px;">SHOW ANALYSIS ></button>
+                    <div id="detail-reasoning-${entry.id}" class="detail-content" style="display:none; padding-left: 10px; border-left: 1px solid #333; margin-bottom: 20px;">Loading...</div>
+                    <div class="chat-box">
+                      <input type="text" class="chat-input" placeholder="ASK FOLLOW UP..." 
+                             onkeypress="if(event.key === 'Enter') sendFollowup('${entry.id}', this)">
+                    </div>
+                  </div>
+                `;
+                dayDiv.appendChild(card);
+            });
+        });
+
+        container.appendChild(dayDiv);
+      }
+    }
+
+    async function toggleDetails(id, btn) {
+      const el = document.getElementById('detail-' + id);
+      if(el.style.display === 'block') {
+        el.style.display = 'none';
+        btn.innerText = 'DETAILS';
+        return;
+      }
+      
+      el.style.display = 'block';
+      btn.innerText = 'CLOSE';
+      
+      const itemsContainer = document.getElementById('detail-items-' + id);
+      const reasoningContainer = document.getElementById('detail-reasoning-' + id);
+
+      // Fetch full details if reasoning not loaded (proxy for "details loaded")
+      if(reasoningContainer.innerText === 'Loading...') {
+        const res = await fetch('/entry/' + id);
+        const data = await res.json();
+        
+        // Render Items List
+        let itemsHtml = '';
+        if(data.items && data.items.length > 0) {
+            data.items.forEach((item, idx) => {
+                itemsHtml += `
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 0.85rem; opacity: 0; animation: fadeIn 0.3s forwards ${idx * 0.05}s;">
+                        <span>${item.name}</span>
+                        <div style="text-align: right; display: flex; gap: 15px; justify-content: flex-end; min-width: 120px;">
+                           <span style="color: #ccc; width: 50px; text-align: right;">${item.protein || 0}g P</span>
+                           <span style="color: #666; width: 60px; text-align: right;">${item.calories} CAL</span>
+                        </div>
+                    </div>
+                `;
+            });
+        } else {
+            itemsHtml = '<div style="color:#666; font-size:0.8rem;">No items details available.</div>';
+        }
+        itemsContainer.innerHTML = itemsHtml;
+
+        // Render Reasoning
+        let html = marked.parse(data.reasoning || data.raw_response || '*No analysis details*');
+        
+        if(data.conversation_messages && data.conversation_messages.length > 2) {
+           html += '<br><hr style="border-color:#333; margin: 20px 0;"><p style="color:#666">HISTORY:</p>';
+           data.conversation_messages.slice(2).forEach(m => {
+              html += `<div style="margin-bottom:10px; color: ${m.role==='user'?'#fff':'#aaa'}">${marked.parse(m.content)}</div>`;
+           });
+        }
+        
+        reasoningContainer.innerHTML = html;
+      }
+    }
+
+    function toggleReasoning(id) {
+        const el = document.getElementById('detail-reasoning-' + id);
+        if(el.style.display === 'none') {
+            el.style.display = 'block';
+        } else {
+            el.style.display = 'none';
+        }
+    }
+
+    async function deleteEntry(id) {
+      if(!confirm('DELETE ENTRY?')) return;
+      await fetch('/entry/' + id, { method: 'DELETE' });
+      loadHistory();
+    }
+
+    async function sendFollowup(id, input) {
+      const msg = input.value;
+      if(!msg) return;
+      
+      // Ensure reasoning is visible if chat is used
+      const reasoningEl = document.getElementById('detail-reasoning-' + id);
+      reasoningEl.style.display = 'block';
+
+      reasoningEl.innerHTML += `<div style="margin-top:10px; color:white; border-left: 2px solid white; padding-left: 10px;">${msg}</div><div class="loading-followup" style="color:#666">...</div>`;
+      input.value = '';
+      
+      try {
+        const res = await fetch('/followup', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ entryId: id, message: msg })
+        });
+        const data = await res.json();
+        
+        reasoningEl.querySelector('.loading-followup').remove();
+        reasoningEl.innerHTML += `<div style="margin-top:10px; color:#aaa;">${marked.parse(data.content)}</div>`;
+      } catch(e) {
+        console.error('Error: ' + e.message);
+      }
+    }
+  </script>
+</body>
+</html>

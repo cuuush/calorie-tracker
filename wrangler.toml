@@ -12,3 +12,11 @@ routes = [
 binding = "DB"
 database_name = "nutrition-db"
 database_id = "e9430bec-7af6-47aa-983b-10b0959f1f38"
+
+# R2 Bucket for food images
+[[r2_buckets]]
+binding = "IMAGES"
+bucket_name = "nutrition-images"
+
+[assets]
+directory = "./public"
