@@ -1,20 +1,29 @@
 {
-  "name": "calorie-tracker",
-  "version": "1.0.0",
-  "main": "index.js",
-  "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
-  "devDependencies": {
-    "wrangler": "^4.56.0"
-  },
-  "dependencies": {
-    "js-base64": "^3.7.8",
-    "openai": "^6.15.0"
-  }
+	"name": "calorie-tracker",
+	"private": true,
+	"version": "0.0.1",
+	"type": "module",
+	"scripts": {
+		"dev": "vite dev",
+		"build": "vite build",
+		"preview": "vite preview",
+		"prepare": "svelte-kit sync || echo ''",
+		"check": "svelte-kit sync && svelte-check --tsconfig ./jsconfig.json",
+		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./jsconfig.json --watch"
+	},
+	"devDependencies": {
+		"@sveltejs/adapter-auto": "^7.0.0",
+		"@sveltejs/kit": "^2.49.1",
+		"@sveltejs/vite-plugin-svelte": "^6.2.1",
+		"svelte": "^5.45.6",
+		"svelte-check": "^4.3.4",
+		"typescript": "^5.9.3",
+		"vite": "^7.2.6"
+	},
+	"dependencies": {
+		"@sveltejs/adapter-cloudflare": "^7.2.4",
+		"js-base64": "^3.7.8",
+		"marked": "^17.0.1",
+		"openai": "^6.15.0"
+	}
 }

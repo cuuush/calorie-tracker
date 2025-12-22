@@ -1,6 +1,7 @@
 name = "calorie-tracker"
-main = "src/index.js"
+main = ".svelte-kit/cloudflare/_worker.js"
 compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
 
 # Deploy to subdomain
 routes = [
@@ -19,4 +20,12 @@ binding = "IMAGES"
 bucket_name = "nutrition-images"
 
 [assets]
-directory = "./public"
+directory = ".svelte-kit/cloudflare"
+binding = "ASSETS"
+
+[observability]
+[observability.logs]
+enabled = false
+head_sampling_rate = 1
+invocation_logs = true
+persist = true

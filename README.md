@@ -1,51 +1,38 @@
-# Calorie Tracker
+# sv
 
-A Cloudflare Workers app that uses OpenRouter + Gemini Flash to estimate calories from food images.
+Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
 
-## Setup
+## Creating a project
 
-1. **Install dependencies:**
-   ```bash
-   npm install
-   ```
+If you're seeing this, you've probably already done this step. Congrats!
 
-2. **Set up OpenRouter API key:**
-   - Get an API key from https://openrouter.ai/
-   - Create `.dev.vars` file:
-     ```
-     OPENROUTER_API_KEY=your_key_here
-     ```
+```sh
+# create a new project in the current directory
+npx sv create
 
-3. **Optional: Enable history storage (KV):**
-   ```bash
-   npx wrangler kv:namespace create CALORIE_HISTORY
-   ```
-   Then uncomment the KV section in `wrangler.toml` and add the ID.
+# create a new project in my-app
+npx sv create my-app
+```
 
-4. **Test locally:**
-   ```bash
-   npx wrangler dev
-   ```
+## Developing
 
-5. **Deploy to Cloudflare:**
-   ```bash
-   # Set the API key as a secret
-   npx wrangler secret put OPENROUTER_API_KEY
+Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
 
-   # Deploy
-   npx wrangler deploy
-   ```
+```sh
+npm run dev
 
-## Features
+# or start the server and open the app in a new browser tab
+npm run dev -- --open
+```
 
-- 📸 Upload food images (drag & drop or camera)
-- 🤖 AI-powered calorie estimation using Gemini Flash
-- 📊 Breakdown of food items and calories
-- 💾 Optional history storage with KV
-- 🎨 Clean, responsive UI
+## Building
 
-## Endpoints
+To create a production version of your app:
 
-- `GET /` - Main app interface
-- `POST /analyze` - Upload image for analysis
-- `GET /history` - View calorie history (if KV enabled)
+```sh
+npm run build
+```
+
+You can preview the production build with `npm run preview`.
+
+> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
