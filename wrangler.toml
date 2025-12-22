@@ -1,0 +1,14 @@
+name = "calorie-tracker"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+# Deploy to subdomain
+routes = [
+  { pattern = "track.cuuush.com/*", zone_name = "cuuush.com" }
+]
+
+# D1 Database for nutrition tracking
+[[d1_databases]]
+binding = "DB"
+database_name = "nutrition-db"
+database_id = "e9430bec-7af6-47aa-983b-10b0959f1f38"
