@@ -47,9 +47,9 @@ export class Auth {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                from: 'Calorie Tracker <noreply@robot.cuuush.com>',
+                from: 'Calorie Tracker <tracker@robot.cuuush.com>',
                 to: [email],
-                subject: 'Sign in to Calorie Tracker',
+                subject: 'Sign in to Tracker',
                 html: `
                     <!DOCTYPE html>
                     <html>

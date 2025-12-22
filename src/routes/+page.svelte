@@ -233,11 +233,13 @@
     }
 
     function toggleEntry(id) {
-        if (expandedEntries.has(id)) {
-            expandedEntries.delete(id);
+        const newSet = new Set(expandedEntries);
+        if (newSet.has(id)) {
+            newSet.delete(id);
         } else {
-            expandedEntries.add(id);
+            newSet.add(id);
         }
+        expandedEntries = newSet;
     }
 
     // --- STATS ---
