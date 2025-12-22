@@ -1,25 +1,17 @@
 import { json } from '@sveltejs/kit';
-import { clearSessionCookie, extractSessionCookie } from '$lib/server/middleware';
 
 /** @type {import('./$types').RequestHandler} */
-export async function POST({ request, locals, platform }) {
+export async function POST({ locals, cookies }) {
     try {
         const { auth } = locals;
-        const cookie = request.headers.get('Cookie');
-        if (cookie) {
-            const sessionToken = extractSessionCookie(cookie);
-            if (sessionToken) {
-                await auth.deleteSession(sessionToken);
-            }
+        const sessionToken = cookies.get('session');
+        if (sessionToken) {
+            await auth.deleteSession(sessionToken);
         }
 
-        const isDev = platform?.env?.DEV === 'true' || platform?.env?.DEV === true;
+        cookies.delete('session', { path: '/' });
 
-        return json({ success: true }, {
-            headers: {
-                'Set-Cookie': clearSessionCookie(isDev)
-            }
-        });
+        return json({ success: true });
     } catch (error) {
         console.error('Logout error:', error);
         return json({ error: error.message }, { status: 500 });

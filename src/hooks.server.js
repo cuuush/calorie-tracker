@@ -4,7 +4,13 @@ import { extractSessionCookie } from '$lib/server/middleware';
 
 /** @type {import('@sveltejs/kit').Handle} */
 export async function handle({ event, resolve }) {
-    const { platform } = event;
+    const { platform, url } = event;
+
+    // Redirect HTTP to HTTPS in production
+    const isDev = platform?.env?.DEV === 'true' || platform?.env?.DEV === true;
+    if (!isDev && url.protocol === 'http:') {
+        return Response.redirect(url.href.replace('http:', 'https:'), 301);
+    }
 
     // Inject auth and storage into event.locals for usage in routes
     if (platform?.env) {
@@ -12,8 +18,7 @@ export async function handle({ event, resolve }) {
         event.locals.storage = new Storage(platform.env);
     }
 
-    const cookie = event.request.headers.get('Cookie');
-    const sessionToken = extractSessionCookie(cookie);
+    const sessionToken = event.cookies.get('session');
 
     if (sessionToken && event.locals.auth) {
         const userId = await event.locals.auth.validateSession(sessionToken);

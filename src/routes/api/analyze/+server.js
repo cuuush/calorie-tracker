@@ -58,7 +58,7 @@ Your task is to estimate nutritional content from text descriptions of meals.
             parameters: {
                 type: 'object',
                 properties: {
-                    meal_title: { type: 'string', description: 'A short, straightforward title for the meal' },
+                    meal_title: { type: 'string', description: 'A concise title for the meal' },
                     items: {
                         type: 'array',
                         items: {
@@ -96,7 +96,7 @@ Your task is to estimate nutritional content from text descriptions of meals.
     const total_protein = items.reduce((sum, item) => sum + (item.protein || 0), 0);
     const total_carbs = items.reduce((sum, item) => sum + (item.carbs || 0), 0);
 
-    let reasoning = choice.message.reasoning || null;
+    let reasoning = choice.message.reasoning || choice.message.thought || null;
 
     // Construct Entry - return but don't save yet
     const entryData = {

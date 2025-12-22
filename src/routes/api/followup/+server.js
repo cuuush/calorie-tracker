@@ -113,12 +113,12 @@ export async function POST({ request, locals, platform }) {
 
     // If we had tool calls, we should call the model one more time to get a final response
     let finalResponseMsg = responseMsg;
-    let finalReasoning = responseMsg.reasoning || null;
+    let finalReasoning = responseMsg.reasoning || responseMsg.thought || null;
 
     if (responseMsg.tool_calls) {
         const finalResponseData = await callOpenRouter(platform.env, conversation, tools, 'auto');
         finalResponseMsg = finalResponseData.choices[0].message;
-        finalReasoning = finalResponseMsg.reasoning || null;
+        finalReasoning = finalResponseMsg.reasoning || finalResponseMsg.thought || null;
         conversation.push(finalResponseMsg);
 
         if (entryId) {

@@ -1,7 +1,7 @@
-import { setSessionCookie } from '$lib/server/middleware';
+import { redirect } from '@sveltejs/kit';
 
 /** @type {import('./$types').RequestHandler} */
-export async function GET({ url, locals, platform }) {
+export async function GET({ url, locals, platform, cookies }) {
     try {
         const { auth } = locals;
         const token = url.searchParams.get('token');
@@ -18,15 +18,17 @@ export async function GET({ url, locals, platform }) {
 
         const isDev = platform?.env?.DEV === 'true' || platform?.env?.DEV === true;
 
-        // Set session cookie and redirect to app
-        return new Response(null, {
-            status: 302,
-            headers: {
-                'Location': '/',
-                'Set-Cookie': setSessionCookie(result.sessionToken, isDev)
-            }
+        cookies.set('session', result.sessionToken, {
+            path: '/',
+            httpOnly: true,
+            secure: !isDev,
+            sameSite: 'lax',
+            maxAge: 60 * 60 * 24 * 30 // 30 days
         });
+
+        throw redirect(302, '/');
     } catch (error) {
+        if (error.status === 302) throw error;
         console.error('Verify error:', error);
         return new Response('Verification failed', { status: 500 });
     }

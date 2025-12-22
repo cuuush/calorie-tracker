@@ -1,36 +1,8 @@
 <script>
-    import { onMount } from 'svelte';
+    import { enhance } from '$app/forms';
     
-    let email = '';
-    let isLoading = false;
-    let isSuccess = false;
-    let sentEmail = '';
-
-    async function login() {
-        if (!email || isLoading) return;
-        
-        isLoading = true;
-        try {
-            const res = await fetch('/auth/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email })
-            });
-            const data = await res.json();
-            
-            if (data.success) {
-                isSuccess = true;
-                sentEmail = email;
-            } else {
-                alert(data.error || 'Failed to send login link');
-            }
-        } catch (e) {
-            console.error(e);
-            alert('Something went wrong');
-        } finally {
-            isLoading = false;
-        }
-    }
+    let { form } = $props();
+    let isLoading = $state(false);
 </script>
 
 {#if isLoading}
@@ -45,33 +17,50 @@
     </header>
 
     <div class="login-container">
-        {#if !isSuccess}
+        {#if !form?.success}
             <h2 class="login-title">SIGN IN</h2>
             <p class="login-subtitle">Enter your email to receive a link to login</p>
 
-            <div id="loginForm">
+            <form 
+                method="POST" 
+                action="?/login" 
+                use:enhance={() => {
+                    isLoading = true;
+                    return async ({ update }) => {
+                        await update();
+                        isLoading = false;
+                    };
+                }}
+                id="loginForm"
+            >
                 <div class="input-group">
                     <input
+                        name="email"
                         type="email"
-                        bind:value={email}
                         class="login-input"
                         placeholder="your@email.com"
-                        onkeypress={(e) => e.key === 'Enter' && login()}
+                        required
                         autocomplete="email"
+                        value={form?.email ?? ''}
                     >
                 </div>
 
+                {#if form?.error}
+                    <p style="color: #ff5555; font-size: 0.8rem; margin-top: 10px;">{form.error}</p>
+                {/if}
+
                 <button
-                    onclick={login}
+                    type="submit"
                     class="login-btn"
+                    disabled={isLoading}
                 >
-                    Login
+                    {isLoading ? 'Sending...' : 'Login'}
                 </button>
-            </div>
+            </form>
         {:else}
             <div id="successMessage" class="success-message">
                 <p class="success-title">CHECK YOUR EMAIL</p>
-                <p class="success-text">We sent a link to <span class="email-display">{sentEmail}</span></p>
+                <p class="success-text">We sent a link to <span class="email-display">{form.sentEmail}</span></p>
                 <p class="success-expiry">The link expires in 15 minutes</p>
             </div>
         {/if}

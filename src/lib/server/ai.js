@@ -1,7 +1,10 @@
 export async function callOpenRouter(env, messages, tools = null, toolChoice = 'auto') {
     const body = {
-        model: 'google/gemini-2.0-flash-exp:free', // Using free model for now
+        model: 'google/gemini-3-flash-preview',
         messages: messages,
+        reasoning: {
+            enabled: true
+        }
     };
 
     if (tools) {
