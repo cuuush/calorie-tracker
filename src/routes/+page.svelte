@@ -745,6 +745,13 @@
     .input-wrapper {
         position: relative;
         flex: 1;
+        padding-right: 8px;
+        min-width: 0;
+        overflow: visible;
+    }
+
+    .input-wrapper .chat-input {
+        width: 100%;
     }
 
     .audio-visualizer {
