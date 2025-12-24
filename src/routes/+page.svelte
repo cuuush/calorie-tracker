@@ -10,16 +10,21 @@
     let currentView = $state('track');
     let isLoading = $state(false);
     let isAiLoading = $state(false);
-    let isTranscribing = $state(false);
     let expandedEntries = $state(new Set());
 
     // Track State
     let userMessage = $state('');
     let fileInput;
     let selectedFile = $state(null);
+    let selectedAudio = $state(null);
     let isRecording = $state(false);
     let mediaRecorder;
     let audioChunks = [];
+    let audioLevels = $state([]);
+    let audioContext;
+    let audioAnalyser;
+    let audioAnimationFrame;
+    let audioFrameCount = 0;
 
     // Result State
     let currentAnalysis = $state(null);
@@ -51,7 +56,7 @@
         if (hour >= 4 && hour < 11) meal = 'breakfast';
         else if (hour >= 11 && hour < 16) meal = 'lunch';
         else if (hour >= 16 && hour < 22) meal = 'dinner';
-        else meal = 'snack';
+        else return 'late night snack?';
         return `What's for ${meal}?`;
     }
     let placeholder = $state(setDynamicPlaceholder());
@@ -71,6 +76,26 @@
     }
 
     // --- TRACK ---
+    function analyzeAudio() {
+        if (!audioAnalyser) return;
+
+        const dataArray = new Uint8Array(audioAnalyser.frequencyBinCount);
+        audioAnalyser.getByteFrequencyData(dataArray);
+
+        // Calculate average volume
+        const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
+        const level = Math.min(100, Math.max(10, (average / 255) * 250));
+
+        // Only add new bar every 6 frames for slower scroll
+        audioFrameCount++;
+        if (audioFrameCount >= 6) {
+            audioLevels = [level, ...audioLevels.slice(0, 69)];
+            audioFrameCount = 0;
+        }
+
+        audioAnimationFrame = requestAnimationFrame(analyzeAudio);
+    }
+
     async function toggleMic() {
         if (!isRecording) {
             try {
@@ -80,11 +105,21 @@
                 mediaRecorder.ondataavailable = (e) => audioChunks.push(e.data);
                 mediaRecorder.onstop = async () => {
                     const blob = new Blob(audioChunks, { type: 'audio/wav' });
-                    await transcribeAudio(blob);
+                    selectedAudio = blob;
                 };
                 mediaRecorder.start();
+
+                // Set up audio visualization
+                audioContext = new AudioContext();
+                const source = audioContext.createMediaStreamSource(stream);
+                audioAnalyser = audioContext.createAnalyser();
+                audioAnalyser.fftSize = 256;
+                source.connect(audioAnalyser);
+                audioLevels = [];
+                audioFrameCount = 0;
+                analyzeAudio();
+
                 isRecording = true;
-                placeholder = "Listening...";
             } catch (err) {
                 alert("Mic access required");
             }
@@ -92,29 +127,28 @@
             mediaRecorder.stop();
             isRecording = false;
             placeholder = setDynamicPlaceholder();
-        }
-    }
 
-    async function transcribeAudio(blob) {
-        isTranscribing = true;
-        try {
-            const formData = new FormData();
-            formData.append('audio', blob, 'audio.wav');
-            const res = await fetch('/api/transcribe', { method: 'POST', body: formData });
-            const data = await res.json();
-            if (data.text) userMessage = data.text;
-        } catch (e) {
-            console.error(e);
-        } finally {
-            isTranscribing = false;
+            // Clean up audio visualization
+            if (audioAnimationFrame) {
+                cancelAnimationFrame(audioAnimationFrame);
+                audioAnimationFrame = null;
+            }
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+            }
+            audioAnalyser = null;
+            audioLevels = [];
+            audioFrameCount = 0;
         }
     }
 
     async function analyze() {
-        if (!selectedFile && !userMessage) return alert('Provide image or text');
+        if (!selectedFile && !userMessage && !selectedAudio) return alert('Provide image, text, or audio');
         isAiLoading = true;
         const formData = new FormData();
         if (selectedFile) formData.append('image', selectedFile);
+        if (selectedAudio) formData.append('audio', selectedAudio);
         formData.append('message', userMessage);
 
         try {
@@ -124,6 +158,7 @@
             selectedItems = data.items.map((_, i) => i);
             userMessage = '';
             selectedFile = null;
+            selectedAudio = null;
             currentView = 'result';
         } finally {
             isAiLoading = false;
@@ -334,9 +369,19 @@
         <div id="trackView">
             <input type="file" bind:this={fileInput} hidden accept="image/*" onchange={(e) => selectedFile = e.target.files[0]}>
             <div class="chat-bar">
-                <input type="text" bind:value={userMessage} class="chat-input" {placeholder}
-                    disabled={isAiLoading || isTranscribing}
-                    onkeypress={(e) => e.key === 'Enter' && analyze()}>
+                <div class="input-wrapper">
+                    <input type="text" bind:value={userMessage} class="chat-input" placeholder={isRecording ? '' : placeholder}
+                        disabled={isAiLoading}
+                        onkeypress={(e) => e.key === 'Enter' && analyze()}>
+                    {#if isRecording}
+                        <div class="audio-visualizer">
+                            {#each audioLevels as level, i}
+                                <div class="audio-bar"
+                                     style="height: {level}%; opacity: {(audioLevels.length - i) / audioLevels.length}"></div>
+                            {/each}
+                        </div>
+                    {/if}
+                </div>
                 <button class="icon-btn" onclick={() => fileInput.click()} title="Add Image">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
@@ -344,8 +389,10 @@
                     </svg>
                 </button>
                 <button class="icon-btn {isRecording ? 'active' : ''}" onclick={toggleMic}>
-                    {#if isTranscribing}
-                        <div class="btn-spinner white"></div>
+                    {#if isRecording}
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                            <rect x="6" y="6" width="12" height="12" rx="2"/>
+                        </svg>
                     {:else}
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
@@ -374,6 +421,16 @@
                     </svg>
                     <span>IMAGE ATTACHED</span>
                     <button class="clear-btn" onclick={() => selectedFile = null} title="Remove image">&times;</button>
+                </div>
+            {/if}
+            {#if selectedAudio}
+                <div class="attachment-badge">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                    </svg>
+                    <span>AUDIO ATTACHED</span>
+                    <button class="clear-btn" onclick={() => selectedAudio = null} title="Remove audio">&times;</button>
                 </div>
             {/if}
 
@@ -412,8 +469,27 @@
                     </div>
 
                     <div class="stats-grid">
-                        <div class="stat-box"><span class="stat-label">WEEKLY CALS</span><span class="stat-value">{Math.round(statsData.weeklyData.reduce((a,b)=>a+b, 0))}</span></div>
-                        <div class="stat-box" style="text-align: right;"><span class="stat-label">WEEKLY PROT</span><span class="stat-value">{Math.round(statsData.weeklyProteinData.reduce((a,b)=>a+b, 0))}g</span></div>
+                        {#if statsData.weeklyData.filter(x => x > 0).length > 0}
+                            {@const daysTracked = statsData.weeklyData.filter(x => x > 0).length}
+                            {@const avgCals = Math.round(statsData.weeklyData.reduce((a,b)=>a+b, 0) / daysTracked)}
+                            {@const avgProt = Math.round(statsData.weeklyProteinData.reduce((a,b)=>a+b, 0) / daysTracked)}
+                            <div class="stat-box">
+                                <span class="stat-label">DAILY AVG</span>
+                                <span class="stat-value">{avgCals} / {dailyBudget}</span>
+                                <span class="stat-label" style="font-size: 0.5rem; margin-top: 4px; color: {avgCals <= dailyBudget ? '#4ade80' : '#f87171'}">
+                                    {avgCals <= dailyBudget ? '✓' : '!'} {avgCals - dailyBudget > 0 ? '+' : ''}{avgCals - dailyBudget} CAL
+                                </span>
+                            </div>
+                            <div class="stat-box" style="text-align: right;">
+                                <span class="stat-label">PROTEIN AVG</span>
+                                <span class="stat-value">{avgProt}g / {proteinGoal}g</span>
+                                <span class="stat-label" style="font-size: 0.5rem; margin-top: 4px; color: {avgProt >= proteinGoal ? '#4ade80' : '#f87171'}">
+                                    {avgProt >= proteinGoal ? '✓' : '!'} {avgProt - proteinGoal > 0 ? '+' : ''}{avgProt - proteinGoal}g
+                                </span>
+                            </div>
+                        {:else}
+                            <div class="stat-box"><span class="stat-label">NO DATA YET</span><span class="stat-value">-</span></div>
+                        {/if}
                     </div>
                     
                     <div class="weekly-chart" style="padding-top:20px;">
@@ -666,6 +742,39 @@
 
 <style>
     /* Add any Svelte-specific styles here */
+    .input-wrapper {
+        position: relative;
+        flex: 1;
+    }
+
+    .audio-visualizer {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 50%;
+        transform: translateY(-50%);
+        height: 48px;
+        padding: 0 12px;
+        display: flex;
+        flex-direction: row-reverse;
+        justify-content: flex-start;
+        gap: 3px;
+        align-items: center;
+        pointer-events: none;
+        z-index: 1;
+        overflow: hidden;
+    }
+
+    .audio-bar {
+        width: 3px;
+        flex-shrink: 0;
+        background: white;
+        border-radius: 2px;
+        transition: height 0.15s ease-out;
+        min-height: 1px;
+        max-height: 48px;
+    }
+
     .spinner {
         width: 40px;
         height: 40px;

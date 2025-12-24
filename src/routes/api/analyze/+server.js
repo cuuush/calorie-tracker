@@ -10,6 +10,7 @@ export async function POST({ request, locals, platform }) {
 
     const formData = await request.formData();
     const imageFile = formData.get('image');
+    const audioFile = formData.get('audio');
     const userMessage = formData.get('message') || '';
 
     // Build messages
@@ -29,6 +30,18 @@ export async function POST({ request, locals, platform }) {
         });
     }
 
+    if (audioFile) {
+        const arrayBuffer = await audioFile.arrayBuffer();
+        const base64Audio = Base64.fromUint8Array(new Uint8Array(arrayBuffer));
+        content.push({
+            type: 'input_audio',
+            input_audio: {
+                data: base64Audio,
+                format: 'wav'
+            }
+        });
+    }
+
     const imagePrompt = `You are an expert nutritionist and visual food analyst. 
 Your task is to identify foods from images and estimate their nutritional content.
 - Be precise in identifying ingredients.
@@ -43,7 +56,7 @@ Your task is to estimate nutritional content from text descriptions of meals.
 - If a description is vague, provide a most likely estimate for a standard serving.
 - Always provide a breakdown of individual items mentioned or implied.`;
 
-    const systemPrompt = imageFile ? imagePrompt : textPrompt;
+    const systemPrompt = (imageFile) ? imagePrompt : textPrompt;
     const messages = [
         { role: 'system', content: systemPrompt },
         { role: 'user', content }
