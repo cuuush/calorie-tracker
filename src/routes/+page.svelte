@@ -144,6 +144,35 @@
     }
 
     async function analyze() {
+        // If recording, stop it first and wait for the blob
+        if (isRecording && mediaRecorder && mediaRecorder.state === 'recording') {
+            await new Promise((resolve) => {
+                const originalOnStop = mediaRecorder.onstop;
+                mediaRecorder.onstop = async () => {
+                    const blob = new Blob(audioChunks, { type: 'audio/wav' });
+                    selectedAudio = blob;
+                    if (originalOnStop) await originalOnStop();
+                    resolve();
+                };
+                mediaRecorder.stop();
+            });
+
+            // Clean up recording state
+            isRecording = false;
+            placeholder = setDynamicPlaceholder();
+            if (audioAnimationFrame) {
+                cancelAnimationFrame(audioAnimationFrame);
+                audioAnimationFrame = null;
+            }
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+            }
+            audioAnalyser = null;
+            audioLevels = [];
+            audioFrameCount = 0;
+        }
+
         if (!selectedFile && !userMessage && !selectedAudio) return alert('Provide image, text, or audio');
         isAiLoading = true;
         const formData = new FormData();
