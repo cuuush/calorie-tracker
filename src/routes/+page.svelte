@@ -210,7 +210,7 @@
             ...currentAnalysis,
             items: finalItems,
             total_calories: finalItems.reduce((s, i) => s + i.calories, 0),
-            total_protein: finalItems.reduce((s, i) => s + i.protein, 0),
+            total_protein: Math.round(finalItems.reduce((s, i) => s + i.protein, 0)),
             total_carbs: finalItems.reduce((s, i) => s + i.carbs, 0)
         };
 

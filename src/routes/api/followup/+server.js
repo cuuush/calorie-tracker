@@ -73,7 +73,7 @@ export async function POST({ request, locals, platform }) {
                 // Calculate totals from updated items
                 const items = args.items || [];
                 const total_calories = items.reduce((sum, item) => sum + (item.calories || 0), 0);
-                const total_protein = items.reduce((sum, item) => sum + (item.protein || 0), 0);
+                const total_protein = Math.round(items.reduce((sum, item) => sum + (item.protein || 0), 0));
                 const total_carbs = items.reduce((sum, item) => sum + (item.carbs || 0), 0);
 
                 if (entry) {
