@@ -564,7 +564,7 @@
                                 <span class="item-name">{item.name}</span>
                             </div>
                             <div class="item-macros">
-                                <span>{item.protein || 0}g P</span>
+                                <span>{Math.round(item.protein || 0)}g P</span>
                                 <span>{item.calories} CAL</span>
                             </div>
                         </div>
@@ -732,7 +732,7 @@
                             </div>
                             <div class="entry-macros">
                                 <div class="macro-row"><span class="macro-detail">CAL</span><span class="macro-total">{entry.total_calories}</span></div>
-                                <div class="macro-row"><span class="macro-detail">PROT</span><span class="macro-total" style="font-size: 0.9rem; color: #aaa;">{entry.total_protein}</span></div>
+                                <div class="macro-row"><span class="macro-detail">PROT</span><span class="macro-total" style="font-size: 0.9rem; color: #aaa;">{Math.round(entry.total_protein)}</span></div>
                             </div>
                         </div>
                         <div class="entry-actions">
@@ -750,7 +750,7 @@
                                             <span class="item-name" style="font-size: 0.8rem;">{item.name}</span>
                                         </div>
                                         <div class="item-macros" style="font-size: 0.75rem;">
-                                            <span>{item.protein || 0}g P</span>
+                                            <span>{Math.round(item.protein || 0)}g P</span>
                                             <span>{item.calories} CAL</span>
                                         </div>
                                     </div>
