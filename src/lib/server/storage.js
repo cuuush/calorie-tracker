@@ -14,7 +14,7 @@ export class Storage {
         }
 
         const entryId = entry.id || `${Date.now()}-${Math.random().toString(36).substring(7)}`;
-        const timestamp = new Date().toISOString();
+        const timestamp = entry.timestamp || new Date().toISOString();
 
         // 1. Save large content to R2
         const largeContent = {
@@ -140,12 +140,12 @@ export class Storage {
             throw new Error('userId is required');
         }
 
-        const { weight, weight_unit, height, height_unit, age, gender, activity_level, maintenance_calories, protein_goal } = settings;
+        const { weight, weight_unit, height, height_unit, age, gender, activity_level, maintenance_calories, protein_goal, protein_focused_mode } = settings;
 
         await this.db.prepare(`
             INSERT INTO user_settings (
-                user_id, weight, weight_unit, height, height_unit, age, gender, activity_level, maintenance_calories, protein_goal, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                user_id, weight, weight_unit, height, height_unit, age, gender, activity_level, maintenance_calories, protein_goal, protein_focused_mode, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(user_id) DO UPDATE SET
                 weight = excluded.weight,
                 weight_unit = excluded.weight_unit,
@@ -156,6 +156,7 @@ export class Storage {
                 activity_level = excluded.activity_level,
                 maintenance_calories = excluded.maintenance_calories,
                 protein_goal = excluded.protein_goal,
+                protein_focused_mode = excluded.protein_focused_mode,
                 updated_at = CURRENT_TIMESTAMP
         `).bind(
             userId,
@@ -167,7 +168,8 @@ export class Storage {
             gender || null,
             activity_level || null,
             maintenance_calories || null,
-            protein_goal || 150
+            protein_goal || 150,
+            protein_focused_mode || 0
         ).run();
 
         return await this.getUserSettings(userId);
