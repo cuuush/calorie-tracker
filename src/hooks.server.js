@@ -16,6 +16,17 @@ export async function handle({ event, resolve }) {
     if (platform?.env) {
         event.locals.auth = new Auth(platform.env);
         event.locals.storage = new Storage(platform.env);
+
+        // Bypass auth for testing
+        if (platform.env.BYPASS_AUTH === 'true') {
+            event.locals.user = {
+                id: 'test-user-123',
+                email: 'test@example.com',
+                created_at: new Date().toISOString()
+            };
+            const response = await resolve(event);
+            return response;
+        }
     }
 
     const sessionToken = event.cookies.get('session');
