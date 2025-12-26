@@ -284,11 +284,12 @@
 
 	function getMealTime() {
 		if (selectedMealPeriod === 'custom' && customMealTime) {
-			return customMealTime;
+			// Convert datetime-local string to ISO string
+			return new Date(customMealTime).toISOString();
 		} else if (selectedMealPeriod === 'current') {
 			return new Date().toISOString();
 		} else {
-			// Set time based on meal period
+			// Set time based on meal period (breakfast, lunch, dinner)
 			const now = new Date();
 			const mealTimes = {
 				breakfast: 8,
@@ -443,7 +444,6 @@
 				TRACK
 			</button>
 			<button class="tab {currentTab === 'history' ? 'active' : ''}" onclick={() => currentTab = 'history'}>
-				<Clock size={16} />
 				HISTORY
 			</button>
 		</div>
@@ -569,16 +569,15 @@
 							{/if}
 						</button>
 					</div>
-				</div>
 
 				<!-- Meal Time Selector -->
-				<div class="meal-time-selector" style="margin-top: 20px;">
+				<div style="margin-top: 20px;">
 					<button
 						class="time-selector-btn"
 						onclick={() => (showTimeSelector = !showTimeSelector)}
 					>
 						<Clock size={16} />
-						Change Meal Time
+						CHANGE MEAL TIME
 						{#if showTimeSelector}
 							<ChevronUp size={12} />
 						{:else}
@@ -593,6 +592,7 @@
 								onclick={() => {
 									selectedMealPeriod = 'current';
 									customMealTime = null;
+									showTimeSelector = false;
 								}}
 							>
 								Now ({new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})
@@ -602,6 +602,7 @@
 								onclick={() => {
 									selectedMealPeriod = 'breakfast';
 									customMealTime = null;
+									showTimeSelector = false;
 								}}
 							>
 								Breakfast (8:00 AM)
@@ -611,6 +612,7 @@
 								onclick={() => {
 									selectedMealPeriod = 'lunch';
 									customMealTime = null;
+									showTimeSelector = false;
 								}}
 							>
 								Lunch (1:00 PM)
@@ -620,6 +622,7 @@
 								onclick={() => {
 									selectedMealPeriod = 'dinner';
 									customMealTime = null;
+									showTimeSelector = false;
 								}}
 							>
 								Dinner (7:00 PM)
@@ -642,6 +645,10 @@
 						</div>
 					{/if}
 				</div>
+
+				</div>
+
+
 
 				<button
 					onclick={commitAnalysis}
@@ -811,12 +818,6 @@
 	.icon-btn:hover {
 		background: var(--surface);
 		border-color: #333;
-	}
-
-	.meal-time-selector {
-		background: #0a0a0a;
-		border-radius: 8px;
-		padding: 0.75rem;
 	}
 
 	.time-selector-btn {

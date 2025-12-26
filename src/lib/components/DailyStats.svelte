@@ -64,22 +64,10 @@
 
 			<!-- Color Key -->
 			<div class="color-key">
-				<div class="key-item">
-					<div class="key-color" style="background: #B5EAD7;"></div>
-					<span>Breakfast</span>
-				</div>
-				<div class="key-item">
-					<div class="key-color" style="background: #FFD3B6;"></div>
-					<span>Lunch</span>
-				</div>
-				<div class="key-item">
-					<div class="key-color" style="background: #C7CEEA;"></div>
-					<span>Dinner</span>
-				</div>
-				<div class="key-item">
-					<div class="key-color" style="background: #FDE2E4;"></div>
-					<span>Snack</span>
-				</div>
+				<span style="color: #B5EAD7;">Breakfast</span>
+				<span style="color: #FFD3B6;">Lunch</span>
+				<span style="color: #C7CEEA;">Dinner</span>
+				<span style="color: #FDE2E4;">Snack</span>
 			</div>
 		{/if}
 	{/if}
@@ -213,27 +201,11 @@
 		gap: 1.5rem;
 		margin-top: 1rem;
 		padding: 0.75rem;
-		background: var(--surface);
-		border: 1px solid var(--border);
-		border-radius: 8px;
 	}
 
-	.key-item {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-	}
-
-	.key-color {
-		width: 12px;
-		height: 12px;
-		border-radius: 3px;
-		border: 1px solid rgba(0, 0, 0, 0.3);
-	}
-
-	.key-item span {
+	.color-key span {
 		font-size: 0.7rem;
-		color: #888;
+		font-weight: 600;
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
 	}

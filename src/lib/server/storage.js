@@ -14,7 +14,7 @@ export class Storage {
         }
 
         const entryId = entry.id || `${Date.now()}-${Math.random().toString(36).substring(7)}`;
-        const timestamp = new Date().toISOString();
+        const timestamp = entry.timestamp || new Date().toISOString();
 
         // 1. Save large content to R2
         const largeContent = {
