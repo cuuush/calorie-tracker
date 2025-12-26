@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import EntryCard from '$lib/components/EntryCard.svelte';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import { ArrowLeft, Calendar } from 'lucide-svelte';
 
 	let loading = $state(true);
 	let history = $state([]);
@@ -93,9 +94,7 @@
 <div class="history-page">
 	<div class="header">
 		<button class="back-btn" onclick={() => goto('/')}>
-			<svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-				<path d="M12.5 15L7.5 10L12.5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-			</svg>
+			<ArrowLeft size={20} />
 			Back
 		</button>
 		<h1>History</h1>
@@ -109,11 +108,7 @@
 		</div>
 	{:else if groups.length === 0}
 		<div class="empty-state">
-			<svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-				<path d="M3 3h18v18H3z"/>
-				<path d="M3 9h18"/>
-				<path d="M9 21V9"/>
-			</svg>
+			<Calendar size={64} strokeWidth={1.5} />
 			<h3>No history yet</h3>
 			<p>Start tracking your meals to see your history here</p>
 			<button class="cta-btn" onclick={() => goto('/')}>Start Tracking</button>

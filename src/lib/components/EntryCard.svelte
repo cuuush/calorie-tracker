@@ -54,8 +54,9 @@
 		</button>
 
 		{#if expanded}
+			{@const items = typeof entry.items === 'string' ? JSON.parse(entry.items) : entry.items}
 			<div class="items-list">
-				{#each JSON.parse(entry.items) as item}
+				{#each items as item}
 					<div class="item">
 						<span class="item-name">{item.name}</span>
 						<span class="item-macros">
@@ -80,10 +81,8 @@
 
 <style>
 	.entry-card {
-		background: var(--surface);
-		border: 1px solid var(--border);
-		border-radius: 12px;
 		padding: 1.25rem;
+		opacity: 1;
 		animation: slideIn 0.3s ease-out;
 	}
 

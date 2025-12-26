@@ -2,13 +2,15 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { marked } from 'marked';
-	import StatsCard from '$lib/components/StatsCard.svelte';
-	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import { Settings, Clock, Send, ChevronDown, ChevronUp } from 'lucide-svelte';
+	import TrackView from '$lib/components/TrackView.svelte';
+	import HistoryView from '$lib/components/HistoryView.svelte';
 
 	let { data } = $props();
 
 	// View State
 	let currentView = $state('track');
+	let currentTab = $state('track'); // 'track' or 'history'
 	let isLoading = $state(false);
 	let isAiLoading = $state(false);
 
@@ -49,14 +51,96 @@
 		todayTotal: 0,
 		todayProtein: 0,
 		groups: {},
+		proteinGroups: {},
 		weeklyData: [],
 		weeklyProteinData: []
 	});
+
+	// History State
+	let historyLoading = $state(true);
+	let history = $state([]);
 
 	onMount(async () => {
 		setDynamicPlaceholder();
 		await loadStats();
 	});
+
+	// Load history when switching to history tab
+	$effect(() => {
+		if (currentTab === 'history' && history.length === 0) {
+			loadHistory();
+		}
+	});
+
+	async function loadHistory() {
+		historyLoading = true;
+		try {
+			const response = await fetch('/api/history');
+			if (response.ok) {
+				history = await response.json();
+			}
+		} catch (error) {
+			console.error('Failed to load history:', error);
+		} finally {
+			historyLoading = false;
+		}
+	}
+
+	async function deleteEntry(id) {
+		try {
+			const response = await fetch(`/api/entry/${id}`, { method: 'DELETE' });
+			if (response.ok) {
+				history = history.filter(entry => entry.id !== id);
+				// Reload stats to reflect the deletion
+				await loadStats();
+			}
+		} catch (error) {
+			console.error('Failed to delete entry:', error);
+			alert('Failed to delete entry');
+		}
+	}
+
+	function getMealType(timestamp) {
+		const hours = new Date(timestamp).getHours();
+		if (hours >= 5 && hours < 12) return 'breakfast';
+		else if (hours >= 12 && hours < 17) return 'lunch';
+		else if (hours >= 17 && hours < 22) return 'dinner';
+		else return 'snack';
+	}
+
+	function groupHistory(entries) {
+		const grouped = {};
+
+		for (const entry of entries) {
+			const date = new Date(entry.timestamp);
+			const dateKey = date.toDateString();
+
+			if (!grouped[dateKey]) {
+				grouped[dateKey] = {
+					date: dateKey,
+					dayName: date.toLocaleDateString('en-US', { weekday: 'long' }),
+					monthDay: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+					mealTimes: {
+						breakfast: [],
+						lunch: [],
+						dinner: [],
+						snack: []
+					},
+					totalCalories: 0,
+					totalProtein: 0
+				};
+			}
+
+			const mealType = getMealType(entry.timestamp);
+			grouped[dateKey].mealTimes[mealType].push(entry);
+			grouped[dateKey].totalCalories += entry.total_calories || 0;
+			grouped[dateKey].totalProtein += entry.total_protein || 0;
+		}
+
+		return Object.values(grouped);
+	}
+
+	let historyGroups = $derived(groupHistory(history));
 
 	function setDynamicPlaceholder() {
 		const hour = new Date().getHours();
@@ -238,7 +322,12 @@
 			// Reset meal time selection
 			selectedMealPeriod = 'current';
 			customMealTime = null;
-			goto('/history');
+			// Reload data
+			await loadStats();
+			history = []; // Reset history so it reloads when switching to history tab
+			// Switch back to track view
+			currentView = 'track';
+			currentTab = 'track';
 		} catch (e) {
 			alert('Save failed');
 		} finally {
@@ -291,12 +380,17 @@
 			);
 
 			const groups = { BREAKFAST: 0, LUNCH: 0, DINNER: 0, SNACK: 0 };
+			const proteinGroups = { BREAKFAST: 0, LUNCH: 0, DINNER: 0, SNACK: 0 };
 			todayEntries.forEach((e) => {
 				const h = new Date(e.timestamp).getHours();
-				if (h >= 4 && h < 11) groups['BREAKFAST'] += e.total_calories;
-				else if (h >= 11 && h < 16) groups['LUNCH'] += e.total_calories;
-				else if (h >= 16 && h < 22) groups['DINNER'] += e.total_calories;
-				else groups['SNACK'] += e.total_calories;
+				let mealType;
+				if (h >= 4 && h < 11) mealType = 'BREAKFAST';
+				else if (h >= 11 && h < 16) mealType = 'LUNCH';
+				else if (h >= 16 && h < 22) mealType = 'DINNER';
+				else mealType = 'SNACK';
+
+				groups[mealType] += e.total_calories;
+				proteinGroups[mealType] += e.total_protein || 0;
 			});
 
 			const startOfWeek = new Date();
@@ -317,6 +411,7 @@
 				todayTotal: todayEntries.reduce((s, e) => s + e.total_calories, 0),
 				todayProtein: todayEntries.reduce((s, e) => s + e.total_protein, 0),
 				groups,
+				proteinGroups,
 				weeklyData,
 				weeklyProteinData
 			};
@@ -334,343 +429,47 @@
 
 <div class="container">
 	<header>
-		<div style="display: flex; justify-content: space-between; align-items: center;">
+		<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
 			<h1>TRACKER</h1>
 			<div class="header-actions">
-				<button class="icon-btn" onclick={() => goto('/history')} title="View History">
-					<svg
-						width="20"
-						height="20"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2"
-					>
-						<circle cx="12" cy="12" r="10" />
-						<polyline points="12 6 12 12 16 14" />
-					</svg>
-				</button>
-				<button class="icon-btn" onclick={() => goto('/settings')} title="Settings">
-					<svg
-						width="20"
-						height="20"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2"
-					>
-						<circle cx="12" cy="12" r="3" />
-						<path
-							d="M12 1v6m0 6v6m9-9h-6m-6 0H3m15.364 6.364l-4.243-4.243m-6.242 0L3.636 17.364m12.728 0l-4.243-4.243m-6.242 0L3.636 6.636"
-						/>
-					</svg>
+				<button class="icon-btn settings-btn" onclick={() => goto('/settings')} title="Settings">
+					<Settings size={20} />
 				</button>
 				<button class="logout-btn" onclick={logout}>LOGOUT</button>
 			</div>
 		</div>
+		<div class="tab-bar">
+			<button class="tab {currentTab === 'track' ? 'active' : ''}" onclick={() => currentTab = 'track'}>
+				TRACK
+			</button>
+			<button class="tab {currentTab === 'history' ? 'active' : ''}" onclick={() => currentTab = 'history'}>
+				<Clock size={16} />
+				HISTORY
+			</button>
+		</div>
 	</header>
 
-	<!-- TRACK VIEW -->
-	{#if currentView === 'track'}
-		<div id="trackView">
-			<input
-				type="file"
-				bind:this={fileInput}
-				hidden
-				accept="image/*"
-				onchange={(e) => (selectedFile = e.target.files[0])}
+	<!-- TRACK TAB -->
+	{#if currentTab === 'track'}
+		{#if currentView === 'track'}
+			<TrackView
+				bind:userMessage
+				bind:selectedFile
+				bind:selectedAudio
+				bind:isRecording
+				{isAiLoading}
+				{placeholder}
+				{audioLevels}
+				{statsData}
+				{statsLoading}
+				{dailyBudget}
+				{proteinGoal}
+				{proteinFocused}
+				onAnalyze={analyze}
+				onToggleMic={toggleMic}
+				onFileSelect={(file) => selectedFile = file}
 			/>
-			<div class="chat-bar">
-				<div class="input-wrapper">
-					<input
-						type="text"
-						bind:value={userMessage}
-						class="chat-input"
-						placeholder={isRecording ? '' : placeholder}
-						disabled={isAiLoading}
-						onkeypress={(e) => e.key === 'Enter' && analyze()}
-					/>
-					{#if isRecording}
-						<div class="audio-visualizer">
-							{#each audioLevels as level, i}
-								<div
-									class="audio-bar"
-									style="height: {level}%; opacity: {(audioLevels.length - i) /
-										audioLevels.length}"
-								></div>
-							{/each}
-						</div>
-					{/if}
-				</div>
-				<button class="icon-btn" onclick={() => fileInput.click()} title="Add Image">
-					<svg
-						width="20"
-						height="20"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-					>
-						<path
-							d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"
-						/>
-						<circle cx="12" cy="13" r="4" />
-					</svg>
-				</button>
-				<button class="icon-btn {isRecording ? 'active' : ''}" onclick={toggleMic}>
-					{#if isRecording}
-						<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-							<rect x="6" y="6" width="12" height="12" rx="2" />
-						</svg>
-					{:else}
-						<svg
-							width="20"
-							height="20"
-							viewBox="0 0 24 24"
-							fill="none"
-							stroke="currentColor"
-							stroke-width="2"
-							stroke-linecap="round"
-							stroke-linejoin="round"
-						>
-							<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-							<path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-							<line x1="12" y1="19" x2="12" y2="23" />
-							<line x1="8" y1="23" x2="16" y2="23" />
-						</svg>
-					{/if}
-				</button>
-				<button class="send-btn" onclick={analyze} disabled={isAiLoading}>
-					{#if isAiLoading}
-						<div class="btn-spinner"></div>
-					{:else}
-						<svg
-							width="18"
-							height="18"
-							viewBox="0 0 24 24"
-							fill="none"
-							stroke="currentColor"
-							stroke-width="2.5"
-							stroke-linecap="round"
-							stroke-linejoin="round"
-						>
-							<line x1="22" y1="2" x2="11" y2="13"></line>
-							<polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-						</svg>
-					{/if}
-				</button>
-			</div>
-			{#if selectedFile}
-				<div class="attachment-badge">
-					<svg
-						width="14"
-						height="14"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2.5"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-					>
-						<path
-							d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"
-						/>
-						<circle cx="12" cy="13" r="4" />
-					</svg>
-					<span>IMAGE ATTACHED</span>
-					<button class="clear-btn" onclick={() => (selectedFile = null)} title="Remove image"
-						>&times;</button
-					>
-				</div>
-			{/if}
-			{#if selectedAudio}
-				<div class="attachment-badge">
-					<svg
-						width="14"
-						height="14"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2.5"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-					>
-						<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-						<path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-					</svg>
-					<span>AUDIO ATTACHED</span>
-					<button class="clear-btn" onclick={() => (selectedAudio = null)} title="Remove audio"
-						>&times;</button
-					>
-				</div>
-			{/if}
-
-			<!-- STATS -->
-			<div id="statsView" style="margin-top: 30px;">
-				{#if !proteinFocused}
-					<div class="stats-card" style="margin: 0; padding: 0; background: transparent; border: none;">
-						<div style="display: flex; justify-content: space-between; align-items: baseline;">
-							{#if statsLoading}
-								<LoadingSkeleton width="120px" height="20px" />
-								<LoadingSkeleton width="150px" height="20px" />
-							{:else}
-								<span class="day-title">DAILY BUDGET</span>
-								<span class="day-summary"
-									>{Math.round(statsData.todayTotal)} / {dailyBudget} CAL</span
-								>
-							{/if}
-						</div>
-						{#if statsLoading}
-							<LoadingSkeleton width="100%" height="40px" borderRadius="12px" />
-						{:else}
-							<div class="progress-container" style="display: flex;">
-								{#each ['BREAKFAST', 'LUNCH', 'DINNER', 'SNACK'] as type}
-									{#if statsData.groups[type] > 0}
-										<div
-											style="width: {(statsData.groups[type] / dailyBudget) *
-												100}%; background: {{
-												BREAKFAST: '#B5EAD7',
-												LUNCH: '#FFD3B6',
-												DINNER: '#C7CEEA',
-												SNACK: '#FDE2E4'
-											}[type]}; height: 100%;"
-										></div>
-									{/if}
-								{/each}
-							</div>
-							<div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
-								<div
-									style="display:flex; gap:10px; font-size: 0.6rem; color: #666; text-transform: uppercase;"
-								>
-									<span style="color:#B5EAD7">Breakfast</span>
-									<span style="color:#FFD3B6">Lunch</span>
-									<span style="color:#C7CEEA">Dinner</span>
-									<span style="color:#FDE2E4">Snack</span>
-								</div>
-								<span class="stat-label"
-									>{Math.round(Math.max(dailyBudget - statsData.todayTotal, 0))} REMAINING</span
-								>
-							</div>
-						{/if}
-					</div>
-				{/if}
-
-				<div
-					class="stats-card"
-					style="margin: 0; padding: 0; background: transparent; border: none; margin-top: {proteinFocused
-						? '0'
-						: '30px'};"
-				>
-					<div style="display: flex; justify-content: space-between; align-items: baseline;">
-						{#if statsLoading}
-							<LoadingSkeleton width="120px" height="20px" />
-							<LoadingSkeleton width="150px" height="20px" />
-						{:else}
-							<span class="day-title">PROTEIN GOAL</span>
-							<span class="day-summary"
-								>{Math.round(statsData.todayProtein)}g / {proteinGoal}g</span
-							>
-						{/if}
-					</div>
-					{#if statsLoading}
-						<LoadingSkeleton width="100%" height="40px" borderRadius="12px" />
-					{:else}
-						<div class="progress-container">
-							<div
-								class="progress-bar protein"
-								style="width: {Math.min((statsData.todayProtein / proteinGoal) * 100, 100)}%;"
-							></div>
-						</div>
-						<div style="display: flex; justify-content: flex-end; margin-bottom: 20px;">
-							<span class="stat-label"
-								>{Math.round(Math.max(proteinGoal - statsData.todayProtein, 0))}g REMAINING</span
-							>
-						</div>
-					{/if}
-				</div>
-
-				{#if statsLoading}
-					<div class="stats-grid">
-						<LoadingSkeleton width="100%" height="80px" />
-						<LoadingSkeleton width="100%" height="80px" />
-					</div>
-				{:else}
-					<div class="stats-grid">
-						{#if statsData.weeklyData.filter((x) => x > 0).length > 0}
-							{@const daysTracked = statsData.weeklyData.filter((x) => x > 0).length}
-							{@const avgCals = Math.round(
-								statsData.weeklyData.reduce((a, b) => a + b, 0) / daysTracked
-							)}
-							{@const avgProt = Math.round(
-								statsData.weeklyProteinData.reduce((a, b) => a + b, 0) / daysTracked
-							)}
-							{#if !proteinFocused}
-								<div class="stat-box">
-									<span class="stat-label">DAILY AVG</span>
-									<span class="stat-value">{avgCals} / {dailyBudget}</span>
-									<span
-										class="stat-label"
-										style="font-size: 0.5rem; margin-top: 4px; color: {avgCals <=
-										dailyBudget
-											? '#4ade80'
-											: '#f87171'}"
-									>
-										{avgCals <= dailyBudget ? '✓' : '!'} {avgCals - dailyBudget > 0 ? '+' : ''}{avgCals -
-											dailyBudget} CAL
-									</span>
-								</div>
-							{/if}
-							<div class="stat-box" style="text-align: {proteinFocused ? 'left' : 'right'};">
-								<span class="stat-label">PROTEIN AVG</span>
-								<span class="stat-value">{avgProt}g / {proteinGoal}g</span>
-								<span
-									class="stat-label"
-									style="font-size: 0.5rem; margin-top: 4px; color: {avgProt >= proteinGoal
-										? '#4ade80'
-										: '#f87171'}"
-								>
-									{avgProt >= proteinGoal ? '✓' : '!'} {avgProt - proteinGoal > 0 ? '+' : ''}{avgProt -
-										proteinGoal}g
-								</span>
-							</div>
-						{:else}
-							<div class="stat-box">
-								<span class="stat-label">NO DATA YET</span><span class="stat-value">-</span>
-							</div>
-						{/if}
-					</div>
-				{/if}
-
-				{#if statsLoading}
-					<LoadingSkeleton width="100%" height="150px" />
-				{:else}
-					<div class="weekly-chart" style="padding-top:20px;">
-						{#each ['S', 'M', 'T', 'W', 'T', 'F', 'S'] as day, i}
-							{@const maxValue = proteinFocused
-								? Math.max(proteinGoal * 1.2, ...statsData.weeklyProteinData)
-								: Math.max(dailyBudget * 1.2, ...statsData.weeklyData)}
-							{@const value = proteinFocused
-								? statsData.weeklyProteinData[i]
-								: statsData.weeklyData[i]}
-							{@const target = proteinFocused ? proteinGoal : dailyBudget}
-							<div class="day-column">
-								<div class="day-bar-wrap">
-									<div
-										class="day-bar {i === new Date().getDay() ? 'today' : ''} {value > target
-											? 'over'
-											: ''}"
-										style="height: {(value / maxValue) * 100}%"
-									></div>
-								</div>
-								<span class="day-name">{day}</span>
-							</div>
-						{/each}
-					</div>
-				{/if}
-			</div>
-		</div>
+		{/if}
 	{/if}
 
 	<!-- RESULT VIEW -->
@@ -766,19 +565,7 @@
 							{#if isAiLoading}
 								<div class="btn-spinner"></div>
 							{:else}
-								<svg
-									width="18"
-									height="18"
-									viewBox="0 0 24 24"
-									fill="none"
-									stroke="currentColor"
-									stroke-width="2.5"
-									stroke-linecap="round"
-									stroke-linejoin="round"
-								>
-									<line x1="22" y1="2" x2="11" y2="13"></line>
-									<polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-								</svg>
+								<Send size={18} />
 							{/if}
 						</button>
 					</div>
@@ -790,14 +577,13 @@
 						class="time-selector-btn"
 						onclick={() => (showTimeSelector = !showTimeSelector)}
 					>
-						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-							<circle cx="12" cy="12" r="10" />
-							<polyline points="12 6 12 12 16 14" />
-						</svg>
+						<Clock size={16} />
 						Change Meal Time
-						<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-							<polyline points="{showTimeSelector ? '18 15 12 9 6 15' : '6 9 12 15 18 9'}" />
-						</svg>
+						{#if showTimeSelector}
+							<ChevronUp size={12} />
+						{:else}
+							<ChevronDown size={12} />
+						{/if}
 					</button>
 
 					{#if showTimeSelector}
@@ -866,6 +652,16 @@
 			</div>
 		</div>
 	{/if}
+
+	<!-- HISTORY TAB -->
+	{#if currentTab === 'history'}
+		<HistoryView
+			{historyGroups}
+			{historyLoading}
+			{proteinFocused}
+			onDeleteEntry={deleteEntry}
+		/>
+	{/if}
 </div>
 
 <style>
@@ -933,6 +729,7 @@
 		z-index: 9999;
 		justify-content: center;
 		align-items: center;
+		padding: 20px;
 	}
 
 	.btn-spinner {
@@ -1088,5 +885,270 @@
 	.custom-time-input:focus {
 		outline: none;
 		border-color: #4ade80;
+	}
+
+	/* Tab Bar */
+	.tab-bar {
+		display: flex;
+		gap: 0.5rem;
+		border-bottom: 2px solid var(--border);
+		margin-bottom: 1.5rem;
+	}
+
+	.tab {
+		flex: 1;
+		background: transparent;
+		border: none;
+		color: #666;
+		padding: 0.75rem 1rem;
+		font-size: 0.875rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 1px;
+		cursor: pointer;
+		position: relative;
+		transition: all 0.2s;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.5rem;
+	}
+
+	.tab:hover {
+		color: #aaa;
+	}
+
+	.tab.active {
+		color: white;
+	}
+
+	.tab.active::after {
+		content: '';
+		position: absolute;
+		bottom: -2px;
+		left: 0;
+		right: 0;
+		height: 2px;
+		background: white;
+	}
+
+	/* Logout Button */
+	.logout-btn {
+		background: transparent;
+		border: 1px solid var(--border);
+		color: white;
+		padding: 0.5rem 1rem;
+		border-radius: 8px;
+		cursor: pointer;
+		transition: all 0.2s;
+		font-size: 0.75rem;
+		font-weight: 600;
+		letter-spacing: 1px;
+		height: 40px;
+		display: flex;
+		align-items: center;
+	}
+
+	.logout-btn:hover {
+		background: var(--surface);
+		border-color: #333;
+	}
+
+	/* Settings Button (Gray) */
+	.settings-btn {
+		color: #666 !important;
+	}
+
+	.settings-btn:hover {
+		color: #aaa !important;
+	}
+
+	/* History View */
+	#historyView {
+		animation: fadeIn 0.3s ease-out;
+	}
+
+	.loading-state {
+		display: flex;
+		flex-direction: column;
+		gap: 1.5rem;
+	}
+
+	.empty-state {
+		text-align: center;
+	}
+
+	.history-list {
+		display: flex;
+		flex-direction: column;
+		gap: 2rem;
+	}
+
+	.date-group {
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+	}
+
+	.date-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding-bottom: 0.75rem;
+		border-bottom: 1px solid var(--border);
+	}
+
+	.date-info {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+	}
+
+	.date-info h2 {
+		font-size: 1.125rem;
+		font-weight: 600;
+		margin: 0;
+		color: var(--text);
+	}
+
+	.date-info .date {
+		font-size: 0.75rem;
+		color: #666;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+	}
+
+	.date-totals {
+		display: flex;
+		gap: 1rem;
+		flex-wrap: wrap;
+	}
+
+	.total {
+		font-size: 0.875rem;
+		font-weight: 500;
+		padding: 0.25rem 0.75rem;
+		border-radius: 6px;
+		background: var(--surface);
+		border: 1px solid var(--border);
+	}
+
+	.total.protein {
+		color: #4ade80;
+	}
+
+	.total.calories {
+		color: #60a5fa;
+	}
+
+	.meal-section {
+		margin-top: 1rem;
+	}
+
+	.meal-header {
+		font-size: 0.875rem;
+		font-weight: 600;
+		color: #888;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		margin: 0 0 0.75rem 0;
+		padding: 0.5rem 0;
+		border-bottom: 1px solid #1a1a1a;
+	}
+
+	.entries {
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+	}
+
+	/* Pie Charts */
+	.pie-charts-container {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 1.5rem;
+		margin-top: 2rem;
+		margin-bottom: 1rem;
+	}
+
+	.pie-chart-wrapper {
+		position: relative;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.75rem;
+	}
+
+	.chart-title {
+		font-size: 0.75rem;
+		font-weight: 600;
+		color: #888;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		margin: 0;
+	}
+
+	.pie-chart {
+		width: 100%;
+		max-width: 150px;
+		height: auto;
+		position: relative;
+	}
+
+	.chart-center-label {
+		position: absolute;
+		top: 50%;
+		left: 50%;
+		transform: translate(-50%, -50%);
+		text-align: center;
+		pointer-events: none;
+		margin-top: 1.5rem;
+	}
+
+	.chart-total {
+		font-size: 1.25rem;
+		font-weight: 700;
+		color: white;
+		line-height: 1;
+	}
+
+	.chart-label {
+		font-size: 0.65rem;
+		color: #666;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		margin-top: 0.125rem;
+	}
+
+	/* Color Key */
+	.color-key {
+		display: flex;
+		justify-content: center;
+		gap: 1.5rem;
+		margin-top: 1rem;
+		padding: 0.75rem;
+		background: var(--surface);
+		border: 1px solid var(--border);
+		border-radius: 8px;
+	}
+
+	.key-item {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.key-color {
+		width: 12px;
+		height: 12px;
+		border-radius: 3px;
+		border: 1px solid rgba(0, 0, 0, 0.3);
+	}
+
+	.key-item span {
+		font-size: 0.7rem;
+		color: #888;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
 	}
 </style>

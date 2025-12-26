@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import { ArrowLeft } from 'lucide-svelte';
 
 	let loading = $state(true);
 	let saving = $state(false);
@@ -112,9 +113,7 @@
 <div class="settings-page">
 	<div class="header">
 		<button class="back-btn" onclick={() => goto('/')}>
-			<svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-				<path d="M12.5 15L7.5 10L12.5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-			</svg>
+			<ArrowLeft size={20} />
 			Back
 		</button>
 		<h1>Settings</h1>
