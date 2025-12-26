@@ -23,7 +23,14 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .dev.vars
 
+<<<<<<< HEAD
 #Playwright
 
 playwright-report/*
 test-results/*
+=======
+# Playwright
+/test-results/
+/playwright-report/
+/playwright/.cache/
+>>>>>>> main
