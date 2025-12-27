@@ -3,12 +3,6 @@
 	import EntryCard from './EntryCard.svelte';
 
 	let { historyGroups, historyLoading, proteinFocused, onDeleteEntry } = $props();
-
-	// Animation timing (in seconds) - tune these to adjust cascade speed
-	const GROUP_DELAY = 0.06;      // Delay between date groups
-	const DATE_ELEMENT_DELAY = 0.06; // Delay between elements in date header
-	const MEAL_DELAY = 0.12;       // Delay between meal sections
-	const ENTRY_DELAY = 0.06;      // Delay between entry cards
 </script>
 
 <div id="historyView">
@@ -24,52 +18,44 @@
 			<span>START TRACKING MEALS</span>
 		</div>
 	{:else}
-		{@const allEntries = historyGroups.flatMap(g =>
-			Object.values(g.mealTimes).flat()
-		)}
 		<div class="history-list">
-			{#each historyGroups as group, groupIndex (group.date)}
-				{@const groupDelay = groupIndex * GROUP_DELAY}
+			{#each historyGroups as group (group.date)}
 				<div class="date-group">
 					<div class="date-header">
 						<div class="date-info">
-							<h2 class="fade-in-element" style="animation-delay: {groupDelay}s;">{group.dayName.toUpperCase()}</h2>
-							<span class="date fade-in-element" style="animation-delay: {groupDelay + DATE_ELEMENT_DELAY}s;">{group.monthDay.toUpperCase()}</span>
+							<h2>{group.dayName.toUpperCase()}</h2>
+							<span class="date">{group.monthDay.toUpperCase()}</span>
 						</div>
 
 						<div class="date-totals">
 						{#if !proteinFocused}
 							<div class="total-item">
-								<div class="total-value fade-in-element" style="animation-delay: {groupDelay + DATE_ELEMENT_DELAY * 2}s;">{Math.round(group.totalCalories)}</div>
-								<div class="total-label fade-in-element" style="animation-delay: {groupDelay + DATE_ELEMENT_DELAY * 3}s;">CAL</div>
+								<div class="total-value">{Math.round(group.totalCalories)}</div>
+								<div class="total-label">CAL</div>
 							</div>
 						{/if}
 						<div class="total-item protein">
-							<div class="total-value fade-in-element" style="animation-delay: {groupDelay + DATE_ELEMENT_DELAY * (proteinFocused ? 2 : 4)}s;">{Math.round(group.totalProtein)}g</div>
-							<div class="total-label fade-in-element" style="animation-delay: {groupDelay + DATE_ELEMENT_DELAY * (proteinFocused ? 3 : 5)}s;">PROTEIN</div>
+							<div class="total-value">{Math.round(group.totalProtein)}g</div>
+							<div class="total-label">PROTEIN</div>
 						</div>
 					</div>
 					</div>
 
-
 					<div class="meals-container">
-						{#each Object.entries(group.mealTimes) as [mealType, entries], mealIndex}
+						{#each Object.entries(group.mealTimes) as [mealType, entries]}
 							{#if entries.length > 0}
 								{@const mealCals = entries.reduce((sum, e) => sum + (e.total_calories || 0), 0)}
 								{@const mealProt = entries.reduce((sum, e) => sum + (e.total_protein || 0), 0)}
-								{@const mealDelay = (mealIndex * MEAL_DELAY)}
-								<div class="meal-section fade-in-element" style="animation-delay: {mealDelay}s;">
+								<div class="meal-section">
 									<div class="meal-header">
 										<span class="meal-type">{mealType.toUpperCase()}</span>
 									</div>
 									<div class="entries">
-										{#each entries as entry, entryIndex (entry.id)}
-											{@const entryDelay = mealDelay + (entryIndex * ENTRY_DELAY)}
+										{#each entries as entry (entry.id)}
 											<EntryCard
 												{entry}
 												onDelete={onDeleteEntry}
 												{proteinFocused}
-												animationDelay={entryDelay}
 											/>
 										{/each}
 									</div>
@@ -84,21 +70,6 @@
 </div>
 
 <style>
-	#historyView {
-		animation: fadeIn 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-	}
-
-	@keyframes fadeIn {
-		from {
-			opacity: 0;
-			transform: translateY(8px);
-		}
-		to {
-			opacity: 1;
-			transform: translateY(0);
-		}
-	}
-
 	.loading-state {
 		display: flex;
 		flex-direction: column;
@@ -240,20 +211,5 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.75rem;
-	}
-
-	.fade-in-element {
-		animation: fadeInUp 0.4s cubic-bezier(0.4, 0, 0.2, 1) both;
-	}
-
-	@keyframes fadeInUp {
-		from {
-			opacity: 0;
-			transform: translateY(12px);
-		}
-		to {
-			opacity: 1;
-			transform: translateY(0);
-		}
 	}
 </style>

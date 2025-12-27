@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { marked } from 'marked';
+	import { fade } from 'svelte/transition';
 	import { Settings, Clock, Send, ChevronDown, ChevronUp, Square, CheckSquare } from 'lucide-svelte';
 	import TrackView from '$lib/components/TrackView.svelte';
 	import HistoryView from '$lib/components/HistoryView.svelte';
@@ -428,30 +429,31 @@
 	</header>
 
 	<!-- TRACK TAB -->
-	{#if currentTab === 'track'}
-		{#if currentView === 'track'}
-			<TrackView
-				bind:userMessage
-				bind:selectedFile
-				bind:selectedAudio
-				bind:isRecording
-				{isAiLoading}
-				{placeholder}
-				{audioLevels}
-				{statsData}
-				{dailyBudget}
-				{proteinGoal}
-				{proteinFocused}
-				onAnalyze={analyze}
-				onToggleMic={toggleMic}
-				onFileSelect={(file) => selectedFile = file}
-				onMealSelect={handleMealSelect}
-			/>
-		{/if}
-	{/if}
+	{#key currentTab}
+		{#if currentTab === 'track'}
+			<div in:fade={{ duration: 150, delay: 100 }} out:fade={{ duration: 100 }}>
+				{#if currentView === 'track'}
+					<TrackView
+						bind:userMessage
+						bind:selectedFile
+						bind:selectedAudio
+						bind:isRecording
+						{isAiLoading}
+						{placeholder}
+						{audioLevels}
+						{statsData}
+						{dailyBudget}
+						{proteinGoal}
+						{proteinFocused}
+						onAnalyze={analyze}
+						onToggleMic={toggleMic}
+						onFileSelect={(file) => selectedFile = file}
+						onMealSelect={handleMealSelect}
+					/>
+				{/if}
 
-	<!-- RESULT VIEW -->
-	{#if currentView === 'result' && currentAnalysis}
+				<!-- RESULT VIEW -->
+				{#if currentView === 'result' && currentAnalysis}
 		<div id="resultView">
 			<div class="day-header" style="margin-top: 0;">
 				<span class="day-title">ANALYSIS RESULT</span>
@@ -639,16 +641,21 @@
 			</div>
 		</div>
 	{/if}
+			</div>
+		{/if}
 
-	<!-- HISTORY TAB -->
-	{#if currentTab === 'history'}
-		<HistoryView
-			{historyGroups}
-			{historyLoading}
-			{proteinFocused}
-			onDeleteEntry={deleteEntry}
-		/>
-	{/if}
+		<!-- HISTORY TAB -->
+		{#if currentTab === 'history'}
+			<div in:fade={{ duration: 150, delay: 100 }} out:fade={{ duration: 100 }}>
+				<HistoryView
+					{historyGroups}
+					{historyLoading}
+					{proteinFocused}
+					onDeleteEntry={deleteEntry}
+				/>
+			</div>
+		{/if}
+	{/key}
 </div>
 
 <style>

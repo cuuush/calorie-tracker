@@ -1,9 +1,6 @@
 <script>
-	let { entry, onDelete, proteinFocused = false, animationDelay = 0 } = $props();
+	let { entry, onDelete, proteinFocused = false } = $props();
 	let expanded = $state(false);
-
-	// Animation timing (in seconds) - tune these to adjust internal cascade speed
-	const ELEMENT_DELAY = 0.1; // Delay between elements within a card
 
 
 	function formatTime(timestamp) {
@@ -25,14 +22,14 @@
 	}
 </script>
 
-<div class="entry-card card-element" style="animation-delay: {animationDelay}s;">
+<div class="entry-card">
 	<div class="entry-main">
 		<div class="entry-left">
-			<div class="entry-time card-element" style="animation-delay: {animationDelay}s;">{time}</div>
-			<h4 class="card-element" style="animation-delay: {animationDelay + ELEMENT_DELAY}s;">{entry.meal_title || 'MEAL'}</h4>
+			<div class="entry-time">{time}</div>
+			<h4>{entry.meal_title || 'MEAL'}</h4>
 		</div>
 		<div class="entry-right">
-			<div class="macros card-element" style="animation-delay: {animationDelay + ELEMENT_DELAY * 2}s;">
+			<div class="macros">
 				{#if !proteinFocused}
 					<div class="macro-item">
 						<div class="macro-value">{Math.round(entry.total_calories)}</div>
@@ -46,7 +43,7 @@
 	</div>
 
 	{#if entry.items}
-		<div class="entry-actions card-element" style="animation-delay: {animationDelay + ELEMENT_DELAY * 3}s;">
+		<div class="entry-actions">
 			<button class="action-btn" onclick={() => (expanded = !expanded)}>
 				{expanded ? 'HIDE' : 'DETAILS'}
 			</button>

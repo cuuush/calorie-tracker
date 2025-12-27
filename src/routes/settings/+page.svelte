@@ -6,6 +6,7 @@
 
 	let loading = $state(true);
 	let isSaving = $state(false);
+	let isExporting = $state(false);
 	let settings = $state({
 		weight: '',
 		weight_unit: 'lbs',
@@ -145,6 +146,33 @@
 				isSaving = false;
 			}
 		}, 500);
+	}
+
+	async function exportHistory() {
+		isExporting = true;
+		try {
+			const response = await fetch('/api/export');
+			if (!response.ok) {
+				throw new Error('Export failed');
+			}
+			const data = await response.json();
+
+			// Create blob and download
+			const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = `calorie-tracker-export-${new Date().toISOString().split('T')[0]}.json`;
+			document.body.appendChild(a);
+			a.click();
+			document.body.removeChild(a);
+			URL.revokeObjectURL(url);
+		} catch (error) {
+			console.error('Export failed:', error);
+			alert('Failed to export history. Please try again.');
+		} finally {
+			isExporting = false;
+		}
 	}
 </script>
 
@@ -320,6 +348,18 @@
 						</button>
 					</div>
 					<span class="helper-text">Recommended: 0.8-1g per lb of body weight</span>
+				</div>
+			</section>
+
+			<!-- Data Export Section -->
+			<section class="settings-section">
+				<h2>Data Export</h2>
+				<div class="form-group">
+					<label>Export Complete History</label>
+					<button type="button" class="export-btn" onclick={exportHistory} disabled={isExporting}>
+						{isExporting ? 'EXPORTING...' : 'EXPORT AS JSON'}
+					</button>
+					<span class="helper-text">Download all your meal data in LLM-friendly JSON format</span>
 				</div>
 			</section>
 		</div>
@@ -583,5 +623,30 @@
 
 	input:checked + .slider:before {
 		transform: translateX(22px);
+	}
+
+	.export-btn {
+		background: transparent;
+		border: 1px solid var(--border);
+		color: var(--text);
+		padding: 0.75rem 1.5rem;
+		border-radius: 8px;
+		font-size: 0.875rem;
+		font-weight: 600;
+		letter-spacing: 0.05em;
+		cursor: pointer;
+		transition: all 0.2s;
+		text-transform: uppercase;
+	}
+
+	.export-btn:hover:not(:disabled) {
+		background: #1a1a1a;
+		border-color: #4ade80;
+		color: #4ade80;
+	}
+
+	.export-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
 	}
 </style>
