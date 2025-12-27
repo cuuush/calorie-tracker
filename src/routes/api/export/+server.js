@@ -11,12 +11,12 @@ export async function GET({ platform, locals }) {
 	try {
 		// Get user settings
 		const settings = await db.prepare(
-			'SELECT * FROM settings WHERE user_id = ?'
+			'SELECT * FROM user_settings WHERE user_id = ?'
 		).bind(userId).first();
 
 		// Get all entries
 		const entries = await db.prepare(
-			'SELECT * FROM entries WHERE user_id = ? ORDER BY timestamp DESC'
+			'SELECT * FROM nutrition_entries WHERE user_id = ? ORDER BY timestamp DESC'
 		).bind(userId).all();
 
 		// Group entries by date
