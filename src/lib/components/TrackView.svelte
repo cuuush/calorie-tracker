@@ -25,21 +25,25 @@
 	let searchTimeout;
 	let showSearchResults = $state(false);
 	let selectedIndex = $state(-1);
+	let searchActive = $state(true); // Track if search should be active
 
 	// Debounced search function
 	async function searchMeals(query) {
 		clearTimeout(searchTimeout);
 
-		if (query.length < 3) {
+		if (query.length < 3 || !searchActive) {
 			searchResults = [];
 			showSearchResults = false;
 			return;
 		}
 
 		searchTimeout = setTimeout(async () => {
+			// Double-check searchActive before showing results
+			if (!searchActive) return;
+
 			try {
 				const response = await fetch(`/api/search-meals?q=${encodeURIComponent(query)}`);
-				if (response.ok) {
+				if (response.ok && searchActive) {
 					searchResults = await response.json();
 					showSearchResults = searchResults.length > 0;
 					selectedIndex = -1;
@@ -50,12 +54,28 @@
 		}, 300);
 	}
 
+	function handleAnalyze() {
+		// Cancel any pending search and prevent future results
+		clearTimeout(searchTimeout);
+		searchActive = false;
+		searchResults = [];
+		showSearchResults = false;
+		onAnalyze();
+		// Re-enable search after a brief delay
+		setTimeout(() => { searchActive = true; }, 100);
+	}
+
 	// Watch userMessage changes
 	$effect(() => {
 		searchMeals(userMessage);
 	});
 
 	function handleKeyDown(e) {
+		if (e.key === 'Enter' && !showSearchResults) {
+			handleAnalyze();
+			return;
+		}
+
 		if (!showSearchResults) return;
 
 		if (e.key === 'ArrowDown') {
@@ -69,7 +89,7 @@
 				e.preventDefault();
 				selectMeal(searchResults[selectedIndex]);
 			} else {
-				onAnalyze();
+				handleAnalyze();
 			}
 		} else if (e.key === 'Escape') {
 			showSearchResults = false;
@@ -137,7 +157,7 @@
 				<Mic size={20} />
 			{/if}
 		</button>
-		<button class="send-btn" onclick={onAnalyze} disabled={isAiLoading}>
+		<button class="send-btn" onclick={handleAnalyze} disabled={isAiLoading}>
 			{#if isAiLoading}
 				<div class="btn-spinner"></div>
 			{:else}
@@ -183,11 +203,12 @@
 
 	.search-dropdown {
 		position: absolute;
+		margin-top: 5px;
 		top: calc(100% + 8px);
 		left: 0;
-		right: 8px;
-		background: #1a1a1a;
-		border: 1px solid #333;
+		right: 0;
+		background: var(--input-bg);
+		border: 1px solid var(--border);
 		border-radius: 8px;
 		overflow: hidden;
 		z-index: 1000;

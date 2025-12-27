@@ -98,6 +98,25 @@
 		autoSave();
 	}
 
+	function calculateProteinGoal() {
+		if (!settings.weight) {
+			alert('Please enter your weight to calculate protein goal');
+			return;
+		}
+
+		// Convert to lbs if needed
+		const weightInLbs = settings.weight_unit === 'lbs'
+			? settings.weight
+			: settings.weight * 2.20462;
+
+		// Recommended: 0.8-1g per lb (using 0.9g as middle ground)
+		const recommendedProtein = Math.round(weightInLbs * 0.9);
+		settings.protein_goal = recommendedProtein;
+
+		// Trigger auto-save after calculation
+		autoSave();
+	}
+
 	async function autoSave() {
 		// Clear existing timeout
 		clearTimeout(saveTimeout);
@@ -288,13 +307,18 @@
 
 				<div class="form-group">
 					<label for="protein">Daily Protein Goal (grams)</label>
-					<input
-						id="protein"
-						type="number"
-						bind:value={settings.protein_goal}
-						oninput={autoSave}
-						placeholder="Enter protein goal"
-					/>
+					<div class="input-with-button">
+						<input
+							id="protein"
+							type="number"
+							bind:value={settings.protein_goal}
+							oninput={autoSave}
+							placeholder="Enter protein goal"
+						/>
+						<button type="button" class="calculate-btn" onclick={calculateProteinGoal}>
+							Auto Calculate
+						</button>
+					</div>
 					<span class="helper-text">Recommended: 0.8-1g per lb of body weight</span>
 				</div>
 			</section>
@@ -412,25 +436,50 @@
 	}
 
 	.input-with-unit {
-		display: grid;
-		grid-template-columns: 1fr auto;
+		display: flex;
+		flex-wrap: wrap;
 		gap: 0.5rem;
 	}
 
+	.input-with-unit input {
+		flex: 1 1 120px;
+		min-width: 0;
+	}
+
 	.input-with-unit select {
+		flex: 0 0 auto;
 		min-width: 80px;
 	}
 
 	.height-inputs {
-		display: grid;
-		grid-template-columns: 1fr 1fr auto;
+		display: flex;
+		flex-wrap: wrap;
 		gap: 0.5rem;
 	}
 
+	.height-inputs input {
+		flex: 1 1 60px;
+		min-width: 0;
+	}
+
+	.height-inputs select {
+		flex: 0 0 auto;
+		min-width: 80px;
+	}
+
 	.input-with-button {
-		display: grid;
-		grid-template-columns: 1fr auto;
+		display: flex;
+		flex-wrap: wrap;
 		gap: 0.5rem;
+	}
+
+	.input-with-button input {
+		flex: 1 1 150px;
+		min-width: 0;
+	}
+
+	.input-with-button .calculate-btn {
+		flex: 0 0 auto;
 	}
 
 	.calculate-btn {

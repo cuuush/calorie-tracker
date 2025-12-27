@@ -353,7 +353,9 @@
 					...currentAnalysis,
 					...data.updatedEntry,
 					reasoning: data.reasoning || currentAnalysis.reasoning,
-					messages: data.messages
+					messages: data.messages,
+					// Update meal_title if provided
+					meal_title: data.updatedEntry.meal_title || currentAnalysis.meal_title
 				};
 				selectedItems = currentAnalysis.items.map((_, i) => i);
 			} else {

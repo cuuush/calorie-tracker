@@ -32,10 +32,14 @@ export async function POST({ request, locals, platform }) {
             type: 'function',
             function: {
                 name: 'update_log',
-                description: 'Update the food log entry details. Provide updated items with their macros - totals will be calculated automatically.',
+                description: 'Update the food log entry details. Provide updated items with their macros. Include meal_title if the meal name should change.',
                 parameters: {
                     type: 'object',
                     properties: {
+                        meal_title: {
+                            type: 'string',
+                            description: 'Updated name/title for the meal'
+                        },
                         items: {
                             type: 'array',
                             items: {
@@ -85,6 +89,11 @@ export async function POST({ request, locals, platform }) {
                         total_carbs
                     };
 
+                    // Update meal title if provided
+                    if (args.meal_title) {
+                        newEntry.meal_title = args.meal_title;
+                    }
+
                     await locals.storage.saveEntry(newEntry, locals.user.id);
                     updatedEntry = newEntry;
                 } else {
@@ -95,6 +104,11 @@ export async function POST({ request, locals, platform }) {
                         total_protein,
                         total_carbs
                     };
+
+                    // Update meal title if provided
+                    if (args.meal_title) {
+                        updatedEntry.meal_title = args.meal_title;
+                    }
                 }
 
                 // Add tool result to conversation
