@@ -1,8 +1,7 @@
 <script>
-	import LoadingSkeleton from './LoadingSkeleton.svelte';
 	import PieChart from './PieChart.svelte';
 
-	let { statsData, statsLoading, dailyBudget, proteinGoal, proteinFocused } = $props();
+	let { statsData, dailyBudget, proteinGoal, proteinFocused } = $props();
 
 	const mealColors = {
 		BREAKFAST: '#B5EAD7',
@@ -16,35 +15,26 @@
 	{#if !proteinFocused}
 		<div class="stats-card" style="margin: 0; padding: 0; background: transparent; border: none;">
 			<div style="display: flex; justify-content: space-between; align-items: baseline;">
-				{#if statsLoading}
-					<LoadingSkeleton width="120px" height="20px" />
-					<LoadingSkeleton width="150px" height="20px" />
-				{:else}
-					<span class="day-title">DAILY INTAKE</span>
-					<span class="day-summary"
-						>{Math.round(statsData.todayTotal)} / {dailyBudget} CAL</span
-					>
-				{/if}
+				<span class="day-title">DAILY INTAKE</span>
+				<span class="day-summary"
+					>{Math.round(statsData.todayTotal)} / {dailyBudget} CAL</span
+				>
 			</div>
-			{#if statsLoading}
-				<LoadingSkeleton width="100%" height="40px" borderRadius="12px" />
-			{:else}
-				<div class="progress-container">
-					<div
-						class="progress-bar"
-						style="width: {Math.min((statsData.todayTotal / dailyBudget) * 100, 100)}%; background: #60a5fa;"
-					></div>
-				</div>
-				<div style="display: flex; justify-content: flex-end; margin-bottom: 20px;">
-					<span class="stat-label"
-						>{Math.round(Math.max(dailyBudget - statsData.todayTotal, 0))} REMAINING</span
-					>
-				</div>
-			{/if}
+			<div class="progress-container">
+				<div
+					class="progress-bar"
+					style="width: {Math.min((statsData.todayTotal / dailyBudget) * 100, 100)}%; background: #60a5fa;"
+				></div>
+			</div>
+			<div style="display: flex; justify-content: flex-end; margin-bottom: 20px;">
+				<span class="stat-label"
+					>{Math.round(Math.max(dailyBudget - statsData.todayTotal, 0))} REMAINING</span
+				>
+			</div>
 		</div>
 
 		<!-- Pie Charts -->
-		{#if !statsLoading && statsData.todayTotal > 0}
+		{#if statsData.todayTotal > 0}
 			<div class="pie-charts-container">
 				<PieChart
 					data={statsData.groups}
@@ -79,40 +69,25 @@
 			: '30px'};"
 	>
 		<div style="display: flex; justify-content: space-between; align-items: baseline;">
-			{#if statsLoading}
-				<LoadingSkeleton width="120px" height="20px" />
-				<LoadingSkeleton width="150px" height="20px" />
-			{:else}
-				<span class="day-title">PROTEIN GOAL</span>
-				<span class="day-summary"
-					>{Math.round(statsData.todayProtein)}g / {proteinGoal}g</span
-				>
-			{/if}
+			<span class="day-title">PROTEIN GOAL</span>
+			<span class="day-summary"
+				>{Math.round(statsData.todayProtein)}g / {proteinGoal}g</span
+			>
 		</div>
-		{#if statsLoading}
-			<LoadingSkeleton width="100%" height="40px" borderRadius="12px" />
-		{:else}
-			<div class="progress-container">
-				<div
-					class="progress-bar protein"
-					style="width: {Math.min((statsData.todayProtein / proteinGoal) * 100, 100)}%;"
-				></div>
-			</div>
-			<div style="display: flex; justify-content: flex-end; margin-bottom: 20px;">
-				<span class="stat-label"
-					>{Math.round(Math.max(proteinGoal - statsData.todayProtein, 0))}g REMAINING</span
-				>
-			</div>
-		{/if}
+		<div class="progress-container">
+			<div
+				class="progress-bar protein"
+				style="width: {Math.min((statsData.todayProtein / proteinGoal) * 100, 100)}%;"
+			></div>
+		</div>
+		<div style="display: flex; justify-content: flex-end; margin-bottom: 20px;">
+			<span class="stat-label"
+				>{Math.round(Math.max(proteinGoal - statsData.todayProtein, 0))}g REMAINING</span
+			>
+		</div>
 	</div>
 
-	{#if statsLoading}
-		<div class="stats-grid">
-			<LoadingSkeleton width="100%" height="80px" />
-			<LoadingSkeleton width="100%" height="80px" />
-		</div>
-	{:else}
-		<div class="stats-grid">
+	<div class="stats-grid">
 			{#if statsData.weeklyData.filter((x) => x > 0).length > 0}
 				{@const daysTracked = statsData.weeklyData.filter((x) => x > 0).length}
 				{@const avgCals = Math.round(
@@ -155,13 +130,9 @@
 					<span class="stat-label">NO DATA YET</span><span class="stat-value">-</span>
 				</div>
 			{/if}
-		</div>
-	{/if}
+	</div>
 
-	{#if statsLoading}
-		<LoadingSkeleton width="100%" height="150px" />
-	{:else}
-		<div class="weekly-chart" style="padding-top:20px;">
+	<div class="weekly-chart" style="padding-top:20px;">
 			{#each ['S', 'M', 'T', 'W', 'T', 'F', 'S'] as day, i}
 				{@const maxValue = proteinFocused
 					? Math.max(proteinGoal * 1.2, ...statsData.weeklyProteinData)
@@ -182,8 +153,7 @@
 					<span class="day-name">{day}</span>
 				</div>
 			{/each}
-		</div>
-	{/if}
+	</div>
 </div>
 
 <style>

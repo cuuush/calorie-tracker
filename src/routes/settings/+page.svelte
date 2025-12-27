@@ -5,7 +5,7 @@
 	import { ArrowLeft } from 'lucide-svelte';
 
 	let loading = $state(true);
-	let saving = $state(false);
+	let isSaving = $state(false);
 	let settings = $state({
 		weight: '',
 		weight_unit: 'lbs',
@@ -22,12 +22,26 @@
 	// Separate feet/inches for height input
 	let heightFeet = $state('');
 	let heightInches = $state('');
+	let saveTimeout;
 
 	$effect(() => {
 		if (settings.height_unit === 'in' && settings.height) {
 			heightFeet = Math.floor(settings.height / 12).toString();
 			heightInches = (settings.height % 12).toString();
 		}
+	});
+
+	// Prevent navigation while saving
+	$effect(() => {
+		const handleBeforeUnload = (e) => {
+			if (isSaving) {
+				e.preventDefault();
+				e.returnValue = '';
+			}
+		};
+
+		window.addEventListener('beforeunload', handleBeforeUnload);
+		return () => window.removeEventListener('beforeunload', handleBeforeUnload);
 	});
 
 	onMount(async () => {
@@ -79,34 +93,39 @@
 
 		const tdee = Math.round(bmr * activityMultipliers[settings.activity_level]);
 		settings.maintenance_calories = tdee;
+
+		// Trigger auto-save after calculation
+		autoSave();
 	}
 
-	async function saveSettings() {
-		saving = true;
-		try {
-			// Convert height from feet/inches if needed
-			if (settings.height_unit === 'in' && (heightFeet || heightInches)) {
-				settings.height = (parseInt(heightFeet) || 0) * 12 + (parseInt(heightInches) || 0);
-			}
+	async function autoSave() {
+		// Clear existing timeout
+		clearTimeout(saveTimeout);
+		isSaving = true;
 
-			const response = await fetch('/api/settings', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify(settings)
-			});
+		// Debounce the save by 500ms
+		saveTimeout = setTimeout(async () => {
+			try {
+				// Convert height from feet/inches if needed
+				if (settings.height_unit === 'in' && (heightFeet || heightInches)) {
+					settings.height = (parseInt(heightFeet) || 0) * 12 + (parseInt(heightInches) || 0);
+				}
 
-			if (response.ok) {
-				alert('Settings saved successfully!');
-				goto('/');
-			} else {
-				alert('Failed to save settings');
+				const response = await fetch('/api/settings', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify(settings)
+				});
+
+				if (!response.ok) {
+					console.error('Failed to save settings');
+				}
+			} catch (error) {
+				console.error('Error saving settings:', error);
+			} finally {
+				isSaving = false;
 			}
-		} catch (error) {
-			console.error('Error saving settings:', error);
-			alert('Failed to save settings');
-		} finally {
-			saving = false;
-		}
+		}, 500);
 	}
 </script>
 
@@ -127,7 +146,7 @@
 			<LoadingSkeleton width="100%" height="60px" />
 		</div>
 	{:else}
-		<form onsubmit={(e) => { e.preventDefault(); saveSettings(); }}>
+		<div>
 			<!-- Display Mode Section -->
 			<section class="settings-section">
 				<h2>Display Preferences</h2>
@@ -141,7 +160,10 @@
 							<input
 								type="checkbox"
 								bind:checked={settings.protein_focused_mode}
-								onchange={(e) => settings.protein_focused_mode = e.target.checked ? 1 : 0}
+								onchange={(e) => {
+									settings.protein_focused_mode = e.target.checked ? 1 : 0;
+									autoSave();
+								}}
 							/>
 							<span class="slider"></span>
 						</label>
@@ -161,9 +183,10 @@
 							type="number"
 							step="0.1"
 							bind:value={settings.weight}
+							oninput={autoSave}
 							placeholder="Enter weight"
 						/>
-						<select bind:value={settings.weight_unit}>
+						<select bind:value={settings.weight_unit} onchange={autoSave}>
 							<option value="lbs">lbs</option>
 							<option value="kg">kg</option>
 						</select>
@@ -177,14 +200,16 @@
 							<input
 								type="number"
 								bind:value={heightFeet}
+								oninput={autoSave}
 								placeholder="Feet"
 							/>
 							<input
 								type="number"
 								bind:value={heightInches}
+								oninput={autoSave}
 								placeholder="Inches"
 							/>
-							<select bind:value={settings.height_unit}>
+							<select bind:value={settings.height_unit} onchange={autoSave}>
 								<option value="in">ft/in</option>
 								<option value="cm">cm</option>
 							</select>
@@ -196,9 +221,10 @@
 								type="number"
 								step="0.1"
 								bind:value={settings.height}
+								oninput={autoSave}
 								placeholder="Enter height"
 							/>
-							<select bind:value={settings.height_unit}>
+							<select bind:value={settings.height_unit} onchange={autoSave}>
 								<option value="in">ft/in</option>
 								<option value="cm">cm</option>
 							</select>
@@ -212,13 +238,14 @@
 						id="age"
 						type="number"
 						bind:value={settings.age}
+						oninput={autoSave}
 						placeholder="Enter age"
 					/>
 				</div>
 
 				<div class="form-group">
 					<label for="gender">Gender</label>
-					<select id="gender" bind:value={settings.gender}>
+					<select id="gender" bind:value={settings.gender} onchange={autoSave}>
 						<option value="">Select gender</option>
 						<option value="male">Male</option>
 						<option value="female">Female</option>
@@ -227,7 +254,7 @@
 
 				<div class="form-group">
 					<label for="activity">Activity Level</label>
-					<select id="activity" bind:value={settings.activity_level}>
+					<select id="activity" bind:value={settings.activity_level} onchange={autoSave}>
 						<option value="">Select activity level</option>
 						<option value="sedentary">Sedentary (little to no exercise)</option>
 						<option value="light">Light (exercise 1-3 days/week)</option>
@@ -249,6 +276,7 @@
 							id="calories"
 							type="number"
 							bind:value={settings.maintenance_calories}
+							oninput={autoSave}
 							placeholder="Enter target"
 						/>
 						<button type="button" class="calculate-btn" onclick={calculateTDEE}>
@@ -264,19 +292,13 @@
 						id="protein"
 						type="number"
 						bind:value={settings.protein_goal}
+						oninput={autoSave}
 						placeholder="Enter protein goal"
 					/>
 					<span class="helper-text">Recommended: 0.8-1g per lb of body weight</span>
 				</div>
 			</section>
-
-			<!-- Action Buttons -->
-			<div class="actions">
-				<button type="submit" class="save-btn" disabled={saving}>
-					{saving ? 'Saving...' : 'Save Settings'}
-				</button>
-			</div>
-		</form>
+		</div>
 	{/if}
 </div>
 
@@ -346,6 +368,7 @@
 		display: flex;
 		flex-direction: column;
 		gap: 1.5rem;
+		margin: 1.5rem;
 	}
 
 	.settings-section h2 {
@@ -511,34 +534,5 @@
 
 	input:checked + .slider:before {
 		transform: translateX(22px);
-	}
-
-	.actions {
-		display: flex;
-		gap: 1rem;
-		padding: 1rem 0;
-	}
-
-	.save-btn {
-		flex: 1;
-		background: var(--text);
-		color: var(--bg);
-		border: none;
-		padding: 1rem;
-		border-radius: 12px;
-		font-size: 1rem;
-		font-weight: 600;
-		cursor: pointer;
-		transition: all 0.2s;
-	}
-
-	.save-btn:hover:not(:disabled) {
-		opacity: 0.9;
-		transform: translateY(-1px);
-	}
-
-	.save-btn:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
 	}
 </style>

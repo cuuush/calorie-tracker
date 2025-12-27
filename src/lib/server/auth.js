@@ -2,6 +2,7 @@ export class Auth {
     constructor(env) {
         this.db = env.DB;
         this.resendApiKey = env.RESEND_API_KEY;
+        this.cache = env.CACHE; // KV for caching sessions
     }
 
     // Generate cryptographically secure random token (32 bytes = 64 hex chars)
@@ -157,6 +158,17 @@ export class Auth {
             return null;
         }
 
+        // Check KV cache first (FAST!)
+        const cacheKey = `session:${token}`;
+        if (this.cache) {
+            const cached = await this.cache.get(cacheKey, 'json');
+            if (cached) {
+                // Cache hit - return userId without hitting D1
+                return cached.userId;
+            }
+        }
+
+        // Cache miss - validate from D1
         const session = await this.db.prepare(`
             SELECT * FROM sessions WHERE token = ?
         `).bind(token).first();
@@ -172,17 +184,35 @@ export class Auth {
             // Delete expired session
             await this.db.prepare('DELETE FROM sessions WHERE token = ?')
                 .bind(token).run();
+            // Also clear cache if it exists
+            if (this.cache) {
+                await this.cache.delete(cacheKey);
+            }
             return null;
         }
 
-        // Refresh session expiry (rolling 30 days)
-        const newExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-        await this.db.prepare(`
-            UPDATE sessions
-            SET last_used_at = CURRENT_TIMESTAMP,
-                expires_at = ?
-            WHERE token = ?
-        `).bind(newExpiresAt.toISOString(), token).run();
+        // Only refresh session expiry if it's been > 1 hour since last update
+        // (avoids D1 writes on every request)
+        const lastUsed = session.last_used_at ? new Date(session.last_used_at) : new Date(0);
+        const hoursSinceLastUpdate = (now - lastUsed) / (1000 * 60 * 60);
+
+        if (hoursSinceLastUpdate > 1) {
+            const newExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+            await this.db.prepare(`
+                UPDATE sessions
+                SET last_used_at = CURRENT_TIMESTAMP,
+                    expires_at = ?
+                WHERE token = ?
+            `).bind(newExpiresAt.toISOString(), token).run();
+        }
+
+        // Cache the session for 10 minutes (short TTL for security)
+        // If session is revoked, it will be invalid within 10 min
+        if (this.cache) {
+            await this.cache.put(cacheKey, JSON.stringify({ userId: session.user_id }), {
+                expirationTtl: 600 // 10 minutes
+            });
+        }
 
         return session.user_id;
     }
@@ -195,6 +225,12 @@ export class Auth {
 
         await this.db.prepare('DELETE FROM sessions WHERE token = ?')
             .bind(token).run();
+
+        // Invalidate cache on logout (CRITICAL for security!)
+        const cacheKey = `session:${token}`;
+        if (this.cache) {
+            await this.cache.delete(cacheKey);
+        }
     }
 
     // Cleanup expired tokens and sessions (should be called periodically)

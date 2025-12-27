@@ -30,3 +30,6 @@ SvelteKit + Cloudflare Workers app for tracking food intake with AI-powered meal
 
 - Svelte 5 runes (`$state`, `$derived`, `$props`, `$bindable`)
 - lucide-svelte for icons
+
+# Extras
+feel free to run npx wrangler, but be mindful that we have production data in DB.

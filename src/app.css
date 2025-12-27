@@ -84,7 +84,8 @@ h1 {
   border: 1px solid var(--border);
   border-radius: 30px;
   padding: 6px 6px 6px 20px;
-  margin-top: 20px;
+  margin-top: 40px;
+  margin-bottom: 60px;
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 
@@ -695,21 +696,44 @@ h1 {
   margin-top: 15px;
 }
 
-/* LOGOUT BUTTON */
+/* Logout Button */
 .logout-btn {
   background: transparent;
   border: 1px solid var(--border);
-  color: var(--text-muted);
-  font-size: 0.65rem;
-  text-transform: uppercase;
-  letter-spacing: 1.5px;
-  padding: 8px 16px;
+  color: #666;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
   cursor: pointer;
-  border-radius: 4px;
-  transition: border-color 0.2s, color 0.2s;
+  transition: all 0.2s;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 1px;
+  height: 40px;
+  display: flex;
+  align-items: center;
 }
 
 .logout-btn:hover {
-  border-color: #444;
-  color: var(--text);
+  background: var(--surface);
+  border-color: #333;
+}
+
+/* Settings Button */
+.settings-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: #666;
+  padding: 0.5rem;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.settings-btn:hover {
+  background: var(--surface);
+  border-color: #333;
+  color: #aaa;
 }

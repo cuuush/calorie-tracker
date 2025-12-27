@@ -11,16 +11,77 @@
 		placeholder,
 		audioLevels,
 		statsData,
-		statsLoading,
 		dailyBudget,
 		proteinGoal,
 		proteinFocused,
 		onAnalyze,
 		onToggleMic,
-		onFileSelect
+		onFileSelect,
+		onMealSelect
 	} = $props();
 
 	let fileInput = $state(null);
+	let searchResults = $state([]);
+	let searchTimeout;
+	let showSearchResults = $state(false);
+	let selectedIndex = $state(-1);
+
+	// Debounced search function
+	async function searchMeals(query) {
+		clearTimeout(searchTimeout);
+
+		if (query.length < 3) {
+			searchResults = [];
+			showSearchResults = false;
+			return;
+		}
+
+		searchTimeout = setTimeout(async () => {
+			try {
+				const response = await fetch(`/api/search-meals?q=${encodeURIComponent(query)}`);
+				if (response.ok) {
+					searchResults = await response.json();
+					showSearchResults = searchResults.length > 0;
+					selectedIndex = -1;
+				}
+			} catch (error) {
+				console.error('Search failed:', error);
+			}
+		}, 300);
+	}
+
+	// Watch userMessage changes
+	$effect(() => {
+		searchMeals(userMessage);
+	});
+
+	function handleKeyDown(e) {
+		if (!showSearchResults) return;
+
+		if (e.key === 'ArrowDown') {
+			e.preventDefault();
+			selectedIndex = Math.min(selectedIndex + 1, searchResults.length - 1);
+		} else if (e.key === 'ArrowUp') {
+			e.preventDefault();
+			selectedIndex = Math.max(selectedIndex - 1, -1);
+		} else if (e.key === 'Enter') {
+			if (selectedIndex >= 0) {
+				e.preventDefault();
+				selectMeal(searchResults[selectedIndex]);
+			} else {
+				onAnalyze();
+			}
+		} else if (e.key === 'Escape') {
+			showSearchResults = false;
+		}
+	}
+
+	function selectMeal(meal) {
+		showSearchResults = false;
+		searchResults = [];
+		userMessage = '';
+		onMealSelect(meal);
+	}
 </script>
 
 <div id="trackView">
@@ -39,7 +100,7 @@
 				class="chat-input"
 				placeholder={isRecording ? '' : placeholder}
 				disabled={isAiLoading}
-				onkeypress={(e) => e.key === 'Enter' && onAnalyze()}
+				onkeydown={handleKeyDown}
 			/>
 			{#if isRecording}
 				<div class="audio-visualizer">
@@ -49,6 +110,19 @@
 							style="height: {level}%; opacity: {(audioLevels.length - i) /
 								audioLevels.length}"
 						></div>
+					{/each}
+				</div>
+			{/if}
+			{#if showSearchResults}
+				<div class="search-dropdown">
+					{#each searchResults as meal, i}
+						<button
+							class="search-result {selectedIndex === i ? 'selected' : ''}"
+							onclick={() => selectMeal(meal)}
+						>
+							<span class="meal-name">{meal.meal_title}</span>
+							<span class="meal-count">{meal.count}x</span>
+						</button>
 					{/each}
 				</div>
 			{/if}
@@ -91,7 +165,7 @@
 	{/if}
 
 	<!-- STATS -->
-	<DailyStats {statsData} {statsLoading} {dailyBudget} {proteinGoal} {proteinFocused} />
+	<DailyStats {statsData} {dailyBudget} {proteinGoal} {proteinFocused} />
 </div>
 
 <style>
@@ -105,6 +179,74 @@
 
 	.input-wrapper .chat-input {
 		width: 100%;
+	}
+
+	.search-dropdown {
+		position: absolute;
+		top: calc(100% + 8px);
+		left: 0;
+		right: 8px;
+		background: #1a1a1a;
+		border: 1px solid #333;
+		border-radius: 8px;
+		overflow: hidden;
+		z-index: 1000;
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+		animation: slideDown 0.2s ease-out;
+	}
+
+	@keyframes slideDown {
+		from {
+			opacity: 0;
+			transform: translateY(-8px);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0);
+		}
+	}
+
+	.search-result {
+		width: 100%;
+		padding: 12px 16px;
+		background: transparent;
+		border: none;
+		border-bottom: 1px solid #222;
+		color: #fff;
+		text-align: left;
+		cursor: pointer;
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		transition: all 0.15s ease;
+	}
+
+	.search-result:last-child {
+		border-bottom: none;
+	}
+
+	.search-result:hover,
+	.search-result.selected {
+		background: #252525;
+	}
+
+	.meal-name {
+		font-size: 0.95rem;
+		font-weight: 500;
+	}
+
+	.meal-count {
+		font-size: 0.75rem;
+		color: #666;
+		font-weight: 600;
+		background: #111;
+		padding: 2px 8px;
+		border-radius: 12px;
+		letter-spacing: 0.5px;
+	}
+
+	.search-result.selected .meal-count {
+		color: #4ade80;
 	}
 
 	.audio-visualizer {

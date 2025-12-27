@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { marked } from 'marked';
-	import { Settings, Clock, Send, ChevronDown, ChevronUp } from 'lucide-svelte';
+	import { Settings, Clock, Send, ChevronDown, ChevronUp, Square, CheckSquare } from 'lucide-svelte';
 	import TrackView from '$lib/components/TrackView.svelte';
 	import HistoryView from '$lib/components/HistoryView.svelte';
 
@@ -41,28 +41,27 @@
 		selectedItems.reduce((sum, idx) => sum + (currentAnalysis?.items[idx]?.protein || 0), 0)
 	);
 
-	// Stats State
-	let settings = $state({});
-	let statsLoading = $state(true);
+	// Stats State - Initialize from server-rendered data
+	let settings = $state(data.settings || {});
 	let dailyBudget = $derived(settings.maintenance_calories || 2000);
 	let proteinGoal = $derived(settings.protein_goal || 150);
 	let proteinFocused = $derived(settings.protein_focused_mode === 1);
-	let statsData = $state({
+	let statsData = $state(data.stats || {
 		todayTotal: 0,
 		todayProtein: 0,
-		groups: {},
-		proteinGroups: {},
-		weeklyData: [],
-		weeklyProteinData: []
+		groups: { BREAKFAST: 0, LUNCH: 0, DINNER: 0, SNACK: 0 },
+		proteinGroups: { BREAKFAST: 0, LUNCH: 0, DINNER: 0, SNACK: 0 },
+		weeklyData: [0, 0, 0, 0, 0, 0, 0],
+		weeklyProteinData: [0, 0, 0, 0, 0, 0, 0]
 	});
 
 	// History State
 	let historyLoading = $state(true);
 	let history = $state([]);
 
-	onMount(async () => {
+	onMount(() => {
 		setDynamicPlaceholder();
-		await loadStats();
+		// Stats already loaded server-side via +page.server.js - no fetch needed!
 	});
 
 	// Load history when switching to history tab
@@ -367,57 +366,34 @@
 		}
 	}
 
+	function handleMealSelect(meal) {
+		// Parse items from JSON string
+		const items = JSON.parse(meal.items);
+
+		// Create analysis object from the selected meal
+		currentAnalysis = {
+			meal_title: meal.meal_title,
+			user_message: meal.user_message || '',
+			items: items,
+			messages: [],
+			reasoning: 'Previously logged meal'
+		};
+
+		// Select all items by default
+		selectedItems = items.map((_, i) => i);
+
+		// Navigate to result view
+		currentView = 'result';
+	}
+
 	// --- STATS ---
+	// Refresh stats from API (used after adding/deleting meals, not on initial load)
 	async function loadStats() {
-		statsLoading = true;
 		try {
-			const [hRes, sRes] = await Promise.all([fetch('/api/history'), fetch('/api/settings')]);
-			const entries = await hRes.json();
-			settings = await sRes.json();
-
-			const todayStr = new Date().toLocaleDateString();
-			const todayEntries = entries.filter(
-				(e) => new Date(e.timestamp).toLocaleDateString() === todayStr
-			);
-
-			const groups = { BREAKFAST: 0, LUNCH: 0, DINNER: 0, SNACK: 0 };
-			const proteinGroups = { BREAKFAST: 0, LUNCH: 0, DINNER: 0, SNACK: 0 };
-			todayEntries.forEach((e) => {
-				const h = new Date(e.timestamp).getHours();
-				let mealType;
-				if (h >= 4 && h < 11) mealType = 'BREAKFAST';
-				else if (h >= 11 && h < 16) mealType = 'LUNCH';
-				else if (h >= 16 && h < 22) mealType = 'DINNER';
-				else mealType = 'SNACK';
-
-				groups[mealType] += e.total_calories;
-				proteinGroups[mealType] += e.total_protein || 0;
-			});
-
-			const startOfWeek = new Date();
-			startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
-			startOfWeek.setHours(0, 0, 0, 0);
-
-			const weeklyData = [0, 0, 0, 0, 0, 0, 0];
-			const weeklyProteinData = [0, 0, 0, 0, 0, 0, 0];
-			entries.forEach((e) => {
-				const d = new Date(e.timestamp);
-				if (d >= startOfWeek) {
-					weeklyData[d.getDay()] += e.total_calories;
-					weeklyProteinData[d.getDay()] += e.total_protein;
-				}
-			});
-
-			statsData = {
-				todayTotal: todayEntries.reduce((s, e) => s + e.total_calories, 0),
-				todayProtein: todayEntries.reduce((s, e) => s + e.total_protein, 0),
-				groups,
-				proteinGroups,
-				weeklyData,
-				weeklyProteinData
-			};
-		} finally {
-			statsLoading = false;
+			const statsRes = await fetch('/api/stats');
+			statsData = await statsRes.json();
+		} catch (error) {
+			console.error('Failed to load stats:', error);
 		}
 	}
 </script>
@@ -433,7 +409,7 @@
 		<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
 			<h1>TRACKER</h1>
 			<div class="header-actions">
-				<button class="icon-btn settings-btn" onclick={() => goto('/settings')} title="Settings">
+				<button class="settings-btn" onclick={() => goto('/settings')} title="Settings">
 					<Settings size={20} />
 				</button>
 				<button class="logout-btn" onclick={logout}>LOGOUT</button>
@@ -461,13 +437,13 @@
 				{placeholder}
 				{audioLevels}
 				{statsData}
-				{statsLoading}
 				{dailyBudget}
 				{proteinGoal}
 				{proteinFocused}
 				onAnalyze={analyze}
 				onToggleMic={toggleMic}
 				onFileSelect={(file) => selectedFile = file}
+				onMealSelect={handleMealSelect}
 			/>
 		{/if}
 	{/if}
@@ -512,11 +488,13 @@
 					{#each currentAnalysis.items as item, i}
 						<div class="item-row" style="animation: fadeIn 0.5s forwards {i * 0.1}s;">
 							<div class="item-left">
-								<input
-									type="checkbox"
-									checked={selectedItems.includes(i)}
-									onchange={() => toggleItem(i)}
-								/>
+								<button class="custom-checkbox" onclick={() => toggleItem(i)}>
+									{#if selectedItems.includes(i)}
+										<CheckSquare size={20} />
+									{:else}
+										<Square size={20} />
+									{/if}
+								</button>
 								<span class="item-name">{item.name}</span>
 							</div>
 							<div class="item-macros">
@@ -672,45 +650,7 @@
 </div>
 
 <style>
-	.input-wrapper {
-		position: relative;
-		flex: 1;
-		padding-right: 8px;
-		min-width: 0;
-		overflow: visible;
-	}
 
-	.input-wrapper .chat-input {
-		width: 100%;
-	}
-
-	.audio-visualizer {
-		position: absolute;
-		left: 0;
-		right: 0;
-		top: 50%;
-		transform: translateY(-50%);
-		height: 48px;
-		padding: 0 12px;
-		display: flex;
-		flex-direction: row-reverse;
-		justify-content: flex-start;
-		gap: 3px;
-		align-items: center;
-		pointer-events: none;
-		z-index: 1;
-		overflow: hidden;
-	}
-
-	.audio-bar {
-		width: 3px;
-		flex-shrink: 0;
-		background: white;
-		border-radius: 2px;
-		transition: height 0.15s ease-out;
-		min-height: 1px;
-		max-height: 48px;
-	}
 
 	.spinner {
 		width: 40px;
@@ -933,223 +873,32 @@
 		background: white;
 	}
 
-	/* Logout Button */
-	.logout-btn {
+	.custom-checkbox {
 		background: transparent;
-		border: 1px solid var(--border);
-		color: white;
-		padding: 0.5rem 1rem;
-		border-radius: 8px;
+		border: none;
+		padding: 0;
+		margin: 0;
 		cursor: pointer;
-		transition: all 0.2s;
-		font-size: 0.75rem;
-		font-weight: 600;
-		letter-spacing: 1px;
-		height: 40px;
 		display: flex;
 		align-items: center;
-	}
-
-	.logout-btn:hover {
-		background: var(--surface);
-		border-color: #333;
-	}
-
-	/* Settings Button (Gray) */
-	.settings-btn {
-		color: #666 !important;
-	}
-
-	.settings-btn:hover {
-		color: #aaa !important;
-	}
-
-	/* History View */
-	#historyView {
-		animation: fadeIn 0.3s ease-out;
-	}
-
-	.loading-state {
-		display: flex;
-		flex-direction: column;
-		gap: 1.5rem;
-	}
-
-	.empty-state {
-		text-align: center;
-	}
-
-	.history-list {
-		display: flex;
-		flex-direction: column;
-		gap: 2rem;
-	}
-
-	.date-group {
-		display: flex;
-		flex-direction: column;
-		gap: 1rem;
-	}
-
-	.date-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding-bottom: 0.75rem;
-		border-bottom: 1px solid var(--border);
-	}
-
-	.date-info {
-		display: flex;
-		flex-direction: column;
-		gap: 0.25rem;
-	}
-
-	.date-info h2 {
-		font-size: 1.125rem;
-		font-weight: 600;
-		margin: 0;
-		color: var(--text);
-	}
-
-	.date-info .date {
-		font-size: 0.75rem;
-		color: #666;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-	}
-
-	.date-totals {
-		display: flex;
-		gap: 1rem;
-		flex-wrap: wrap;
-	}
-
-	.total {
-		font-size: 0.875rem;
-		font-weight: 500;
-		padding: 0.25rem 0.75rem;
-		border-radius: 6px;
-		background: var(--surface);
-		border: 1px solid var(--border);
-	}
-
-	.total.protein {
-		color: #4ade80;
-	}
-
-	.total.calories {
-		color: #60a5fa;
-	}
-
-	.meal-section {
-		margin-top: 1rem;
-	}
-
-	.meal-header {
-		font-size: 0.875rem;
-		font-weight: 600;
-		color: #888;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		margin: 0 0 0.75rem 0;
-		padding: 0.5rem 0;
-		border-bottom: 1px solid #1a1a1a;
-	}
-
-	.entries {
-		display: flex;
-		flex-direction: column;
-		gap: 1rem;
-	}
-
-	/* Pie Charts */
-	.pie-charts-container {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: 1.5rem;
-		margin-top: 2rem;
-		margin-bottom: 1rem;
-	}
-
-	.pie-chart-wrapper {
-		position: relative;
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		gap: 0.75rem;
-	}
-
-	.chart-title {
-		font-size: 0.75rem;
-		font-weight: 600;
-		color: #888;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		margin: 0;
-	}
-
-	.pie-chart {
-		width: 100%;
-		max-width: 150px;
-		height: auto;
-		position: relative;
-	}
-
-	.chart-center-label {
-		position: absolute;
-		top: 50%;
-		left: 50%;
-		transform: translate(-50%, -50%);
-		text-align: center;
-		pointer-events: none;
-		margin-top: 1.5rem;
-	}
-
-	.chart-total {
-		font-size: 1.25rem;
-		font-weight: 700;
-		color: white;
-		line-height: 1;
-	}
-
-	.chart-label {
-		font-size: 0.65rem;
-		color: #666;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		margin-top: 0.125rem;
-	}
-
-	/* Color Key */
-	.color-key {
-		display: flex;
 		justify-content: center;
-		gap: 1.5rem;
-		margin-top: 1rem;
-		padding: 0.75rem;
-		background: var(--surface);
-		border: 1px solid var(--border);
-		border-radius: 8px;
+		color: var(--text);
+		transition: all 0.2s;
 	}
 
-	.key-item {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
+	.custom-checkbox:hover {
+		color: #4ade80;
+		transform: scale(1.1);
 	}
 
-	.key-color {
-		width: 12px;
-		height: 12px;
-		border-radius: 3px;
-		border: 1px solid rgba(0, 0, 0, 0.3);
+	.custom-checkbox:active {
+		transform: scale(0.95);
 	}
 
-	.key-item span {
-		font-size: 0.7rem;
-		color: #888;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-	}
+
+
+
+
+
+
 </style>

@@ -12,7 +12,8 @@
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./jsconfig.json --watch",
 		"test": "playwright test",
 		"test:ui": "playwright test --ui",
-		"test:debug": "playwright test --debug"
+		"test:debug": "playwright test --debug",
+		"db:seed": "npx wrangler d1 execute nutrition-db --local --file=./seed.sql"
 	},
 	"devDependencies": {
 		"@playwright/test": "^1.57.0",

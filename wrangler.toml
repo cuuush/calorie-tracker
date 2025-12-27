@@ -19,6 +19,11 @@ database_id = "e9430bec-7af6-47aa-983b-10b0959f1f38"
 binding = "IMAGES"
 bucket_name = "nutrition-images"
 
+# KV Namespace for caching (settings, sessions, etc)
+[[kv_namespaces]]
+binding = "CACHE"
+id = "b18df762459a4cea8a42a0fdd22a07ea"
+
 [assets]
 directory = ".svelte-kit/cloudflare"
 binding = "ASSETS"
