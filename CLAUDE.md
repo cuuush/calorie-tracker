@@ -19,7 +19,6 @@ SvelteKit + Cloudflare Workers app for tracking food intake with AI-powered meal
 
 - **Database**: Cloudflare D1
   - Schema: `/schema.sql`
-  - Migrations: `/migrations/`
   - Bindings: `wrangler.toml`
 
 - **AI**: OpenRouter API
