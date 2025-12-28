@@ -120,22 +120,21 @@
 					date: dateKey,
 					dayName: date.toLocaleDateString('en-US', { weekday: 'long' }),
 					monthDay: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-					mealTimes: {
-						breakfast: [],
-						lunch: [],
-						dinner: [],
-						snack: []
-					},
+					entries: [],
 					totalCalories: 0,
 					totalProtein: 0
 				};
 			}
 
-			const mealType = getMealType(entry.timestamp);
-			grouped[dateKey].mealTimes[mealType].push(entry);
+			grouped[dateKey].entries.push(entry);
 			grouped[dateKey].totalCalories += entry.total_calories || 0;
 			grouped[dateKey].totalProtein += entry.total_protein || 0;
 		}
+
+		// Sort entries within each day by timestamp (earliest to latest)
+		Object.values(grouped).forEach(day => {
+			day.entries.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+		});
 
 		return Object.values(grouped);
 	}
@@ -402,7 +401,10 @@
 	// Refresh stats from API (used after adding/deleting meals, not on initial load)
 	async function loadStats() {
 		try {
-			const statsRes = await fetch('/api/stats');
+			// Send current local date to server
+			const now = new Date();
+			const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+			const statsRes = await fetch(`/api/stats?date=${dateStr}`);
 			statsData = await statsRes.json();
 		} catch (error) {
 			console.error('Failed to load stats:', error);

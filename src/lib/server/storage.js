@@ -211,23 +211,28 @@ export class Storage {
         return await this.getUserSettings(userId);
     }
 
-    async getStats(userId) {
+    async getStats(userId, clientDate = null) {
         if (!this.db) return null;
 
         if (!userId) {
             throw new Error('userId is required');
         }
 
-        // Get today's date boundaries in ISO format
-        const now = new Date();
-        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-        const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).toISOString();
+        // Use client-provided date or fallback to UTC
+        const now = clientDate ? new Date(clientDate) : new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        const todayStart = `${year}-${month}-${day}T00:00:00`;
+        const todayEnd = `${year}-${month}-${day}T23:59:59`;
 
         // Get start of week (Sunday)
         const startOfWeek = new Date(now);
         startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
-        startOfWeek.setHours(0, 0, 0, 0);
-        const weekStart = startOfWeek.toISOString();
+        const weekYear = startOfWeek.getFullYear();
+        const weekMonth = String(startOfWeek.getMonth() + 1).padStart(2, '0');
+        const weekDay = String(startOfWeek.getDate()).padStart(2, '0');
+        const weekStart = `${weekYear}-${weekMonth}-${weekDay}T00:00:00`;
 
         // Get today's entries for meal breakdown
         const { results: todayEntries } = await this.db.prepare(`
@@ -252,7 +257,9 @@ export class Storage {
         let todayProtein = 0;
 
         todayEntries.forEach(entry => {
-            const h = new Date(entry.timestamp).getHours();
+            // Parse hours directly from timestamp string (format: "YYYY-MM-DDTHH:MM:SS")
+            const timePart = entry.timestamp.split('T')[1] || '00:00:00';
+            const h = parseInt(timePart.split(':')[0], 10);
             let mealType;
             if (h >= 4 && h < 11) mealType = 'BREAKFAST';
             else if (h >= 11 && h < 16) mealType = 'LUNCH';
@@ -270,7 +277,10 @@ export class Storage {
         const weeklyProteinData = [0, 0, 0, 0, 0, 0, 0];
 
         weekEntries.forEach(entry => {
-            const d = new Date(entry.timestamp);
+            // Parse date directly from timestamp string (format: "YYYY-MM-DDTHH:MM:SS")
+            const datePart = entry.timestamp.split('T')[0];
+            const [year, month, day] = datePart.split('-').map(Number);
+            const d = new Date(year, month - 1, day);
             const dayOfWeek = d.getDay();
             weeklyData[dayOfWeek] += entry.total_calories;
             weeklyProteinData[dayOfWeek] += entry.total_protein || 0;

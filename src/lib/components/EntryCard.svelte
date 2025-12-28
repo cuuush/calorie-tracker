@@ -13,7 +13,16 @@
 		return `${displayHours}:${minutes} ${period}`;
 	}
 
+	function getMealType(timestamp) {
+		const hours = new Date(timestamp).getHours();
+		if (hours >= 5 && hours < 12) return 'BREAKFAST';
+		else if (hours >= 12 && hours < 17) return 'LUNCH';
+		else if (hours >= 17 && hours < 22) return 'DINNER';
+		else return 'SNACK';
+	}
+
 	const time = formatTime(entry.timestamp);
+	const mealType = getMealType(entry.timestamp);
 
 	async function handleDelete() {
 		if (confirm('DELETE THIS ENTRY?')) {
@@ -25,7 +34,7 @@
 <div class="entry-card">
 	<div class="entry-main">
 		<div class="entry-left">
-			<div class="entry-time">{time}</div>
+			<div class="entry-time">{mealType} - {time}</div>
 			<h4>{entry.meal_title || 'MEAL'}</h4>
 		</div>
 		<div class="entry-right">
@@ -39,15 +48,15 @@
 					<div class="macro-value">{Math.round(entry.total_protein)}g</div>
 				</div>
 			</div>
+			{#if entry.items}
+				<button class="action-btn details-btn" onclick={() => (expanded = !expanded)}>
+					{expanded ? 'HIDE' : 'DETAILS'}
+				</button>
+			{/if}
 		</div>
 	</div>
 
 	{#if entry.items}
-		<div class="entry-actions">
-			<button class="action-btn" onclick={() => (expanded = !expanded)}>
-				{expanded ? 'HIDE' : 'DETAILS'}
-			</button>
-		</div>
 
 		{#if expanded}
 			{@const items = typeof entry.items === 'string' ? JSON.parse(entry.items) : entry.items}
@@ -89,7 +98,7 @@
 
 <style>
 	.entry-card {
-		padding: 1.25rem;
+		padding: 1rem;
 		background: #0a0a0a;
 		border: 1px solid #222;
 		border-radius: 8px;
@@ -121,7 +130,6 @@
 		justify-content: space-between;
 		align-items: flex-start;
 		gap: 1rem;
-		margin-bottom: 1rem;
 	}
 
 	.entry-left {
@@ -150,6 +158,10 @@
 
 	.entry-right {
 		flex-shrink: 0;
+		display: flex;
+		flex-direction: column;
+		align-items: flex-end;
+		gap: 0.5rem;
 	}
 
 	.macros {
@@ -177,12 +189,8 @@
 		color: #4ade80;
 	}
 
-
-	.entry-actions {
-		display: flex;
-		gap: 0.75rem;
-		padding-top: 0.75rem;
-		border-top: 1px solid #1a1a1a;
+	.details-btn {
+		margin-top: 0.25rem;
 	}
 
 	.delete-section {

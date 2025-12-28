@@ -41,26 +41,13 @@
 					</div>
 					</div>
 
-					<div class="meals-container">
-						{#each Object.entries(group.mealTimes) as [mealType, entries]}
-							{#if entries.length > 0}
-								{@const mealCals = entries.reduce((sum, e) => sum + (e.total_calories || 0), 0)}
-								{@const mealProt = entries.reduce((sum, e) => sum + (e.total_protein || 0), 0)}
-								<div class="meal-section">
-									<div class="meal-header">
-										<span class="meal-type">{mealType.toUpperCase()}</span>
-									</div>
-									<div class="entries">
-										{#each entries as entry (entry.id)}
-											<EntryCard
-												{entry}
-												onDelete={onDeleteEntry}
-												{proteinFocused}
-											/>
-										{/each}
-									</div>
-								</div>
-							{/if}
+					<div class="entries-container">
+						{#each group.entries as entry (entry.id)}
+							<EntryCard
+								{entry}
+								onDelete={onDeleteEntry}
+								{proteinFocused}
+							/>
 						{/each}
 					</div>
 				</div>
@@ -178,36 +165,7 @@
 		letter-spacing: 0.15em;
 	}
 
-	.meals-container {
-		display: flex;
-		flex-direction: column;
-		gap: 2rem;
-	}
-
-	.meal-section {
-		display: flex;
-		flex-direction: column;
-		gap: 0.75rem;
-	}
-
-	.meal-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: baseline;
-		padding-bottom: 0.5rem;
-		border-bottom: 1px solid #1a1a1a;
-	}
-
-	.meal-type {
-		font-size: 0.7rem;
-		font-weight: 700;
-		color: #888;
-		text-transform: uppercase;
-		letter-spacing: 0.15em;
-	}
-
-
-	.entries {
+	.entries-container {
 		display: flex;
 		flex-direction: column;
 		gap: 0.75rem;
