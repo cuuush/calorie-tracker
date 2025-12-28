@@ -121,6 +121,17 @@
 				placeholder={isRecording ? '' : placeholder}
 				disabled={isAiLoading}
 				onkeydown={handleKeyDown}
+				onblur={() => {
+					// Delay to allow click events on suggestions to fire first
+					setTimeout(() => {
+						showSearchResults = false;
+					}, 150);
+				}}
+				onfocus={() => {
+					if (userMessage.length >= 3) {
+						searchMeals(userMessage);
+					}
+				}}
 			/>
 			{#if isRecording}
 				<div class="audio-visualizer">
@@ -207,7 +218,7 @@
 		top: calc(100% + 8px);
 		left: 0;
 		right: 0;
-		background: var(--input-bg);
+		background: #111;
 		border: 1px solid var(--border);
 		border-radius: 8px;
 		overflow: hidden;

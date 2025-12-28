@@ -283,22 +283,31 @@
 	}
 
 	function getMealTime() {
+		let date;
 		if (selectedMealPeriod === 'custom' && customMealTime) {
-			// Convert datetime-local string to ISO string
-			return new Date(customMealTime).toISOString();
+			date = new Date(customMealTime);
 		} else if (selectedMealPeriod === 'current') {
-			return new Date().toISOString();
+			date = new Date();
 		} else {
 			// Set time based on meal period (breakfast, lunch, dinner)
-			const now = new Date();
+			date = new Date();
 			const mealTimes = {
 				breakfast: 8,
 				lunch: 13,
 				dinner: 19
 			};
-			now.setHours(mealTimes[selectedMealPeriod] || now.getHours(), 0, 0, 0);
-			return now.toISOString();
+			date.setHours(mealTimes[selectedMealPeriod] || date.getHours(), 0, 0, 0);
 		}
+
+		// Format as local time string (no timezone conversion)
+		const year = date.getFullYear();
+		const month = String(date.getMonth() + 1).padStart(2, '0');
+		const day = String(date.getDate()).padStart(2, '0');
+		const hours = String(date.getHours()).padStart(2, '0');
+		const minutes = String(date.getMinutes()).padStart(2, '0');
+		const seconds = String(date.getSeconds()).padStart(2, '0');
+
+		return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
 	}
 
 	async function commitAnalysis() {

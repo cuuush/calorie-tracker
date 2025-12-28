@@ -22,13 +22,18 @@ export async function GET({ platform, locals }) {
 		// Group entries by date
 		const entriesByDate = {};
 		for (const entry of entries.results) {
-			const date = new Date(entry.timestamp);
-			const dateKey = date.toISOString().split('T')[0];
+			// Parse timestamp as local time (no timezone conversion)
+			const timestamp = entry.timestamp;
+			const dateKey = timestamp.split('T')[0];
 
 			if (!entriesByDate[dateKey]) {
+				// Parse date parts directly from the timestamp string
+				const [year, month, day] = dateKey.split('-').map(Number);
+				const localDate = new Date(year, month - 1, day);
+
 				entriesByDate[dateKey] = {
 					date: dateKey,
-					dayOfWeek: date.toLocaleDateString('en-US', { weekday: 'long' }),
+					dayOfWeek: localDate.toLocaleDateString('en-US', { weekday: 'long' }),
 					entries: [],
 					totalCalories: 0,
 					totalProtein: 0,
@@ -40,15 +45,18 @@ export async function GET({ platform, locals }) {
 			// Parse items
 			const items = typeof entry.items === 'string' ? JSON.parse(entry.items) : entry.items;
 
+			// Extract time from timestamp string (format: "YYYY-MM-DDTHH:MM:SS")
+			const timePart = timestamp.split('T')[1] || '00:00:00';
+			const [hours, minutes] = timePart.split(':').map(Number);
+			const hour12 = hours % 12 || 12;
+			const ampm = hours >= 12 ? 'PM' : 'AM';
+			const timeOfDay = `${String(hour12).padStart(2, '0')}:${String(minutes).padStart(2, '0')} ${ampm}`;
+
 			// Format entry
 			const formattedEntry = {
 				id: entry.id,
 				timestamp: entry.timestamp,
-				timeOfDay: new Date(entry.timestamp).toLocaleTimeString('en-US', {
-					hour: '2-digit',
-					minute: '2-digit',
-					hour12: true
-				}),
+				timeOfDay: timeOfDay,
 				mealType: getMealType(entry.timestamp),
 				mealTitle: entry.meal_title,
 				userMessage: entry.user_message,
@@ -142,7 +150,9 @@ export async function GET({ platform, locals }) {
 }
 
 function getMealType(timestamp) {
-	const hours = new Date(timestamp).getHours();
+	// Extract hours directly from timestamp string (format: "YYYY-MM-DDTHH:MM:SS")
+	const timePart = timestamp.split('T')[1] || '00:00:00';
+	const hours = parseInt(timePart.split(':')[0], 10);
 	if (hours >= 5 && hours < 12) return 'breakfast';
 	else if (hours >= 12 && hours < 17) return 'lunch';
 	else if (hours >= 17 && hours < 22) return 'dinner';
