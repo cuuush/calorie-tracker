@@ -4,6 +4,7 @@
 	import EntryCard from '$lib/components/EntryCard.svelte';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { ArrowLeft, Calendar } from 'lucide-svelte';
+	import { toast } from '$lib/toast.svelte.js';
 
 	let loading = $state(true);
 	let history = $state([]);
@@ -44,7 +45,7 @@
 			}
 		} catch (error) {
 			console.error('Failed to delete entry:', error);
-			alert('Failed to delete entry');
+			toast('Failed to delete entry', { kind: 'error' });
 		}
 	}
 

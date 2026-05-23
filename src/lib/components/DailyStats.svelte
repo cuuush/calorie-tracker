@@ -7,8 +7,21 @@
 		BREAKFAST: '#B5EAD7',
 		LUNCH: '#FFD3B6',
 		DINNER: '#C7CEEA',
-		SNACK: '#FDE2E4'
+		SNACK: '#FDE2E4',
+		REMAINING: '#1f1f1f'
 	};
+
+	let calData = $derived({
+		...statsData.groups,
+		REMAINING: Math.max(dailyBudget - statsData.todayTotal, 0)
+	});
+	let calPieTotal = $derived(Math.max(statsData.todayTotal, dailyBudget));
+
+	let proteinData = $derived({
+		...statsData.proteinGroups,
+		REMAINING: Math.max(proteinGoal - statsData.todayProtein, 0)
+	});
+	let proteinPieTotal = $derived(Math.max(statsData.todayProtein, proteinGoal));
 </script>
 
 <div id="statsView" style="margin-top: 30px;">
@@ -34,32 +47,32 @@
 		</div>
 
 		<!-- Pie Charts -->
-		{#if statsData.todayTotal > 0}
-			<div class="pie-charts-container">
-				<PieChart
-					data={statsData.groups}
-					total={statsData.todayTotal}
-					title="Calories by Meal"
-					unit="CAL"
-					colors={mealColors}
-				/>
-				<PieChart
-					data={statsData.proteinGroups}
-					total={statsData.todayProtein}
-					title="Protein by Meal"
-					unit="g"
-					colors={mealColors}
-				/>
-			</div>
+		<div class="pie-charts-container">
+			<PieChart
+				data={calData}
+				total={calPieTotal}
+				consumed={statsData.todayTotal}
+				title="Calories by Meal"
+				unit="CAL"
+				colors={mealColors}
+			/>
+			<PieChart
+				data={proteinData}
+				total={proteinPieTotal}
+				consumed={statsData.todayProtein}
+				title="Protein by Meal"
+				unit="g"
+				colors={mealColors}
+			/>
+		</div>
 
-			<!-- Color Key -->
-			<div class="color-key">
-				<span style="color: #B5EAD7;">Breakfast</span>
-				<span style="color: #FFD3B6;">Lunch</span>
-				<span style="color: #C7CEEA;">Dinner</span>
-				<span style="color: #FDE2E4;">Snack</span>
-			</div>
-		{/if}
+		<!-- Color Key -->
+		<div class="color-key">
+			<span style="color: #B5EAD7;">Breakfast</span>
+			<span style="color: #FFD3B6;">Lunch</span>
+			<span style="color: #C7CEEA;">Dinner</span>
+			<span style="color: #FDE2E4;">Snack</span>
+		</div>
 	{/if}
 
 	<div

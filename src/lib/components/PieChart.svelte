@@ -1,5 +1,6 @@
 <script>
-	let { data, total, title, unit, colors } = $props();
+	let { data, total, title, unit, colors, consumed } = $props();
+	let centerValue = $derived(consumed ?? total);
 
 	// Helper function to create pie chart slice path
 	function createPieSlice(startAngle, endAngle) {
@@ -41,7 +42,7 @@
 		{/each}
 	</svg>
 	<div class="chart-center-label">
-		<div class="chart-total">{Math.round(total)}</div>
+		<div class="chart-total">{Math.round(centerValue)}</div>
 		<div class="chart-label">{unit}</div>
 	</div>
 </div>

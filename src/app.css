@@ -89,6 +89,11 @@ h1 {
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 
+/* Tighten the gap when an attachment badge follows the chat-bar */
+.chat-bar:has(+ .attachment-badge) {
+  margin-bottom: 10px;
+}
+
 .chat-bar:focus-within {
   border-color: #444;
   box-shadow: 0 0 20px rgba(255, 255, 255, 0.02);

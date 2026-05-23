@@ -332,7 +332,8 @@
 		border: 1px solid #333;
 		padding: 6px 12px;
 		border-radius: 20px;
-		margin-top: 15px;
+		margin-top: 6px;
+		margin-right: 8px;
 		font-size: 0.65rem;
 		font-weight: 600;
 		letter-spacing: 1px;

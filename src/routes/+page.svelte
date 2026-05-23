@@ -3,17 +3,35 @@
 	import { goto } from '$app/navigation';
 	import { marked } from 'marked';
 	import { fade } from 'svelte/transition';
-	import { Settings, Clock, Send, ChevronDown, ChevronUp, Square, CheckSquare } from 'lucide-svelte';
+	import { Settings, Clock, Send, Pencil, Square, CheckSquare } from 'lucide-svelte';
 	import TrackView from '$lib/components/TrackView.svelte';
 	import HistoryView from '$lib/components/HistoryView.svelte';
+	import ChatView from '$lib/components/ChatView.svelte';
+	import { toast } from '$lib/toast.svelte.js';
+	import { fetchWithRetry } from '$lib/net.js';
 
 	let { data } = $props();
 
 	// View State
 	let currentView = $state('track');
-	let currentTab = $state('track'); // 'track' or 'history'
+	let currentTab = $state('track'); // 'track' | 'history' | 'chat'
+	let chatMessages = $state([]); // persists across tab switches
+	let chatConversationId = $state(null); // server-side persistence id
 	let isLoading = $state(false);
 	let isAiLoading = $state(false);
+
+	// Analyze flow state
+	// 'idle' | 'loading' | 'clarifying' | 'rejected' | 'ready'
+	let analyzePhase = $state('idle');
+	let pendingClarification = $state(null);
+	let analysisRejection = $state(null);
+	let analyzeAbort = null;
+	let otherInput = $state('');
+	let showOtherInput = $state(false);
+
+	// Edit-with-AI three-phase animation: idle → fading-out → loading → fading-in → idle
+	let editPhase = $state('idle');
+	let skeletonRowCount = $state(0);
 
 	// Track State
 	let userMessage = $state('');
@@ -22,6 +40,7 @@
 	let selectedAudio = $state(null);
 	let isRecording = $state(false);
 	let mediaRecorder;
+	let mediaStream;
 	let audioChunks = [];
 	let audioLevels = $state([]);
 	let audioContext;
@@ -32,7 +51,7 @@
 	// Result State
 	let currentAnalysis = $state(null);
 	let selectedItems = $state([]);
-	let customMealTime = $state(null);
+	let customHour = $state(null); // integer 0-23 when selectedMealPeriod === 'custom'
 	let showTimeSelector = $state(false);
 	let selectedMealPeriod = $state('current'); // 'breakfast', 'lunch', 'dinner', 'custom', 'current'
 	let resultTotalCal = $derived(
@@ -42,8 +61,29 @@
 		selectedItems.reduce((sum, idx) => sum + (currentAnalysis?.items[idx]?.protein || 0), 0)
 	);
 
+	function fmtTime(date) {
+		return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+	}
+
+	function fmtHour12(h) {
+		if (h === 0) return '12 AM';
+		if (h === 12) return '12 PM';
+		return h < 12 ? `${h} AM` : `${h - 12} PM`;
+	}
+
+	let displayMealTime = $derived.by(() => {
+		if (selectedMealPeriod === 'custom' && customHour !== null) {
+			return fmtHour12(customHour);
+		}
+		if (selectedMealPeriod === 'breakfast') return '8:00 AM';
+		if (selectedMealPeriod === 'lunch') return '1:00 PM';
+		if (selectedMealPeriod === 'dinner') return '7:00 PM';
+		return fmtTime(new Date());
+	});
+
 	// Stats State - Initialize from server-rendered data
-	let settings = $state(data.settings || {});
+	// $derived so navigating back from /settings picks up the fresh load.
+	let settings = $derived(data.settings || {});
 	let dailyBudget = $derived(settings.maintenance_calories || 2000);
 	let proteinGoal = $derived(settings.protein_goal || 150);
 	let proteinFocused = $derived(settings.protein_focused_mode === 1);
@@ -62,7 +102,13 @@
 
 	onMount(() => {
 		setDynamicPlaceholder();
-		// Stats already loaded server-side via +page.server.js - no fetch needed!
+		// Stats already loaded server-side via +page.server.js — but if the user's tz
+		// differs from what the server used (e.g. first-ever visit before the tz cookie
+		// was set), refetch with the correct local date so the pie charts populate.
+		const clientTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+		if (data.tz_used && data.tz_used !== clientTz) {
+			loadStats();
+		}
 	});
 
 	// Load history when switching to history tab
@@ -75,7 +121,7 @@
 	async function loadHistory() {
 		historyLoading = true;
 		try {
-			const response = await fetch('/api/history');
+			const response = await fetchWithRetry('/api/history');
 			if (response.ok) {
 				history = await response.json();
 			}
@@ -88,7 +134,7 @@
 
 	async function deleteEntry(id) {
 		try {
-			const response = await fetch(`/api/entry/${id}`, { method: 'DELETE' });
+			const response = await fetchWithRetry(`/api/entry/${id}`, { method: 'DELETE' });
 			if (response.ok) {
 				history = history.filter(entry => entry.id !== id);
 				// Reload stats to reflect the deletion
@@ -96,7 +142,7 @@
 			}
 		} catch (error) {
 			console.error('Failed to delete entry:', error);
-			alert('Failed to delete entry');
+			toast('Failed to delete entry', { kind: 'error' });
 		}
 	}
 
@@ -152,12 +198,6 @@
 	}
 	let placeholder = $state(setDynamicPlaceholder());
 
-	async function logout() {
-		if (!confirm('Are you sure you want to log out?')) return;
-		await fetch('/auth/logout', { method: 'POST' });
-		window.location.href = '/login';
-	}
-
 	// --- AUDIO VISUALIZATION ---
 	function analyzeAudio() {
 		if (!audioAnalyser) return;
@@ -177,21 +217,29 @@
 		audioAnimationFrame = requestAnimationFrame(analyzeAudio);
 	}
 
+	function stopMicStream() {
+		if (mediaStream) {
+			mediaStream.getTracks().forEach((t) => t.stop());
+			mediaStream = null;
+		}
+	}
+
 	async function toggleMic() {
 		if (!isRecording) {
 			try {
-				const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-				mediaRecorder = new MediaRecorder(stream);
+				mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+				mediaRecorder = new MediaRecorder(mediaStream);
 				audioChunks = [];
 				mediaRecorder.ondataavailable = (e) => audioChunks.push(e.data);
 				mediaRecorder.onstop = async () => {
 					const blob = new Blob(audioChunks, { type: 'audio/wav' });
 					selectedAudio = blob;
+					stopMicStream();
 				};
 				mediaRecorder.start();
 
 				audioContext = new AudioContext();
-				const source = audioContext.createMediaStreamSource(stream);
+				const source = audioContext.createMediaStreamSource(mediaStream);
 				audioAnalyser = audioContext.createAnalyser();
 				audioAnalyser.fftSize = 256;
 				source.connect(audioAnalyser);
@@ -201,7 +249,8 @@
 
 				isRecording = true;
 			} catch (err) {
-				alert('Mic access required');
+				stopMicStream();
+				toast('Mic access required', { kind: 'error' });
 			}
 		} else {
 			mediaRecorder.stop();
@@ -250,25 +299,85 @@
 			audioFrameCount = 0;
 		}
 
-		if (!selectedFile && !userMessage && !selectedAudio)
-			return alert('Provide image, text, or audio');
-		isAiLoading = true;
+		if (!selectedFile && !userMessage && !selectedAudio) {
+			toast('Add a photo, text, or voice first.');
+			return;
+		}
+
+		// Navigate to result view IMMEDIATELY with skeleton placeholders.
+		currentAnalysis = null;
+		pendingClarification = null;
+		analysisRejection = null;
+		showOtherInput = false;
+		otherInput = '';
+		analyzePhase = 'loading';
+		currentView = 'result';
+
 		const formData = new FormData();
 		if (selectedFile) formData.append('image', selectedFile);
 		if (selectedAudio) formData.append('audio', selectedAudio);
 		formData.append('message', userMessage);
 
+		analyzeAbort = new AbortController();
 		try {
-			const res = await fetch('/api/analyze', { method: 'POST', body: formData });
+			const res = await fetchWithRetry('/api/analyze', {
+				method: 'POST',
+				body: formData,
+				signal: analyzeAbort.signal
+			});
 			const data = await res.json();
+			handleAnalyzeResponse(data);
+		} catch (err) {
+			if (err.name === 'AbortError') return;
+			analysisRejection = { message: "Couldn't reach the server. Try again." };
+			analyzePhase = 'rejected';
+		} finally {
+			analyzeAbort = null;
+		}
+	}
+
+	function handleAnalyzeResponse(data) {
+		if (data.clarification) {
+			pendingClarification = data.clarification;
+			currentAnalysis = { messages: data.messages, items: [], meal_title: '' };
+			analyzePhase = 'clarifying';
+		} else if (data.rejection) {
+			analysisRejection = data.rejection;
+			analyzePhase = 'rejected';
+		} else {
 			currentAnalysis = data;
 			selectedItems = data.items.map((_, i) => i);
 			userMessage = '';
 			selectedFile = null;
 			selectedAudio = null;
-			currentView = 'result';
+			analyzePhase = 'ready';
+		}
+	}
+
+	async function answerClarification(choice) {
+		if (!choice || !pendingClarification) return;
+		const tool_call_id = pendingClarification.tool_call_id;
+		const messages = currentAnalysis.messages;
+		pendingClarification = null;
+		showOtherInput = false;
+		otherInput = '';
+		analyzePhase = 'loading';
+		analyzeAbort = new AbortController();
+		try {
+			const res = await fetchWithRetry('/api/analyze', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ messages, tool_call_id, choice }),
+				signal: analyzeAbort.signal
+			});
+			const data = await res.json();
+			handleAnalyzeResponse(data);
+		} catch (err) {
+			if (err.name === 'AbortError') return;
+			analysisRejection = { message: "Couldn't reach the server. Try again." };
+			analyzePhase = 'rejected';
 		} finally {
-			isAiLoading = false;
+			analyzeAbort = null;
 		}
 	}
 
@@ -283,8 +392,9 @@
 
 	function getMealTime() {
 		let date;
-		if (selectedMealPeriod === 'custom' && customMealTime) {
-			date = new Date(customMealTime);
+		if (selectedMealPeriod === 'custom' && customHour !== null) {
+			date = new Date();
+			date.setHours(customHour, 0, 0, 0);
 		} else if (selectedMealPeriod === 'current') {
 			date = new Date();
 		} else {
@@ -309,6 +419,22 @@
 		return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
 	}
 
+	function cancelAnalysis() {
+		if (analyzeAbort) analyzeAbort.abort();
+		currentAnalysis = null;
+		selectedItems = [];
+		selectedMealPeriod = 'current';
+		customHour = null;
+		showTimeSelector = false;
+		pendingClarification = null;
+		analysisRejection = null;
+		showOtherInput = false;
+		otherInput = '';
+		analyzePhase = 'idle';
+		currentView = 'track';
+		// selectedFile / selectedAudio / userMessage preserved — user can retry.
+	}
+
 	async function commitAnalysis() {
 		isLoading = true;
 		const finalItems = selectedItems.map((idx) => currentAnalysis.items[idx]);
@@ -323,14 +449,15 @@
 		};
 
 		try {
-			await fetch('/api/entry', {
+			await fetchWithRetry('/api/entry', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify(entry)
 			});
 			// Reset meal time selection
 			selectedMealPeriod = 'current';
-			customMealTime = null;
+			customHour = null;
+			analyzePhase = 'idle';
 			// Reload data
 			await loadStats();
 			history = []; // Reset history so it reloads when switching to history tab
@@ -338,7 +465,7 @@
 			currentView = 'track';
 			currentTab = 'track';
 		} catch (e) {
-			alert('Save failed');
+			toast('Save failed', { kind: 'error' });
 		} finally {
 			isLoading = false;
 		}
@@ -346,14 +473,29 @@
 
 	async function handleFollowup(message) {
 		if (!message) return;
+
+		// Snapshot the item count BEFORE the edit so the skeleton matches what was there.
+		const prevCount = currentAnalysis?.items?.length || 0;
+		skeletonRowCount = prevCount;
+
+		// Phase 1: fade out the existing items top-to-bottom
+		const fadeOutMs = Math.min(500, 200 + prevCount * 70);
+		editPhase = 'fading-out';
+		await new Promise((r) => setTimeout(r, fadeOutMs));
+
+		// Phase 2: skeleton placeholders (count matches the previous items) while we fetch
+		editPhase = 'loading';
 		isAiLoading = true;
+
 		try {
-			const res = await fetch('/api/followup', {
+			const res = await fetchWithRetry('/api/followup', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					messages: currentAnalysis.messages,
-					message
+					message,
+					currentItems: currentAnalysis.items,
+					currentMealTitle: currentAnalysis.meal_title
 				})
 			});
 			const data = await res.json();
@@ -363,19 +505,34 @@
 					...data.updatedEntry,
 					reasoning: data.reasoning || currentAnalysis.reasoning,
 					messages: data.messages,
-					// Update meal_title if provided
 					meal_title: data.updatedEntry.meal_title || currentAnalysis.meal_title
 				};
 				selectedItems = currentAnalysis.items.map((_, i) => i);
 			} else {
-				currentAnalysis.messages = data.messages;
+				currentAnalysis = { ...currentAnalysis, messages: data.messages };
 			}
+
+			// Phase 3: fade in the new items top-to-bottom
+			editPhase = 'fading-in';
+			const newCount = currentAnalysis?.items?.length || 0;
+			const fadeInMs = 200 + newCount * 80 + 250;
+			await new Promise((r) => setTimeout(r, fadeInMs));
+			editPhase = 'idle';
 		} catch (e) {
 			console.error(e);
+			editPhase = 'idle';
 		} finally {
 			isAiLoading = false;
 		}
 	}
+
+	let followupMessages = $derived(
+		(currentAnalysis?.messages || []).filter((m) => {
+			if (m.role === 'user' && typeof m.content === 'string') return true;
+			if (m.role === 'assistant' && m.content && !m.tool_calls) return true;
+			return false;
+		})
+	);
 
 	function handleMealSelect(meal) {
 		// Parse items from JSON string
@@ -393,7 +550,7 @@
 		// Select all items by default
 		selectedItems = items.map((_, i) => i);
 
-		// Navigate to result view
+		analyzePhase = 'ready';
 		currentView = 'result';
 	}
 
@@ -404,7 +561,7 @@
 			// Send current local date to server
 			const now = new Date();
 			const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-			const statsRes = await fetch(`/api/stats?date=${dateStr}`);
+			const statsRes = await fetchWithRetry(`/api/stats?date=${dateStr}`, { silent: true });
 			statsData = await statsRes.json();
 		} catch (error) {
 			console.error('Failed to load stats:', error);
@@ -426,7 +583,6 @@
 				<button class="settings-btn" onclick={() => goto('/settings')} title="Settings">
 					<Settings size={20} />
 				</button>
-				<button class="logout-btn" onclick={logout}>LOGOUT</button>
 			</div>
 		</div>
 		<div class="tab-bar">
@@ -435,6 +591,9 @@
 			</button>
 			<button class="tab {currentTab === 'history' ? 'active' : ''}" onclick={() => currentTab = 'history'}>
 				HISTORY
+			</button>
+			<button class="tab {currentTab === 'chat' ? 'active' : ''}" onclick={() => currentTab = 'chat'}>
+				CHAT
 			</button>
 		</div>
 	</header>
@@ -464,7 +623,106 @@
 				{/if}
 
 				<!-- RESULT VIEW -->
-				{#if currentView === 'result' && currentAnalysis}
+				{#if currentView === 'result'}
+					{#if analyzePhase === 'loading' && !currentAnalysis}
+						<!-- Loading skeleton state (no analysis yet) -->
+						<div id="resultView">
+							<div class="day-header" style="margin-top: 0;">
+								<span class="day-title">ANALYZING…</span>
+							</div>
+							<div class="entry-card" style="opacity: 1; margin-top: 20px;">
+								<div class="entry-main">
+									<div class="entry-info" style="flex: 1;">
+										<div class="skeleton-title"></div>
+										<div class="skeleton-pill"></div>
+									</div>
+									<div class="entry-macros">
+										<div class="skeleton-macro"></div>
+										<div class="skeleton-macro"></div>
+									</div>
+								</div>
+								<div class="skeleton-items" style="margin-top: 30px; border-top: 1px solid #333; padding-top: 20px;">
+									{#each Array(3) as _, i}
+										<div class="skeleton-row" style="--delay: {i * 0.12}s"></div>
+									{/each}
+								</div>
+								<div class="result-actions">
+									<button onclick={cancelAnalysis} class="cancel-entry-btn">Cancel</button>
+								</div>
+							</div>
+						</div>
+					{:else if analyzePhase === 'clarifying' && pendingClarification}
+						<!-- Clarification question state -->
+						<div id="resultView">
+							<div class="entry-card" style="opacity: 1; margin-top: 20px;">
+								<div class="clarify-card">
+									<p class="clarify-question">{pendingClarification.question}</p>
+									<div class="clarify-options">
+										{#each pendingClarification.options as opt}
+											<button class="clarify-option" onclick={() => answerClarification(opt.value)}>
+												{opt.label}
+											</button>
+										{/each}
+										{#if !showOtherInput}
+											<button class="clarify-option other" onclick={() => (showOtherInput = true)}>
+												Other…
+											</button>
+										{:else}
+											<form
+												class="clarify-other-form"
+												onsubmit={(e) => {
+													e.preventDefault();
+													if (otherInput.trim()) answerClarification(otherInput.trim());
+												}}
+											>
+												<input
+													type="text"
+													bind:value={otherInput}
+													class="clarify-other-input"
+													placeholder="Type your answer…"
+												/>
+												<button type="submit" class="clarify-other-submit" disabled={!otherInput.trim()}>
+													Send
+												</button>
+											</form>
+										{/if}
+									</div>
+								</div>
+								<div class="result-actions">
+									<button onclick={cancelAnalysis} class="cancel-entry-btn">Cancel</button>
+								</div>
+							</div>
+						</div>
+					{:else if analyzePhase === 'loading' && currentAnalysis}
+						<!-- Continuation loading (after clarification answer) -->
+						<div id="resultView">
+							<div class="day-header" style="margin-top: 0;">
+								<span class="day-title">ANALYZING…</span>
+							</div>
+							<div class="entry-card" style="opacity: 1; margin-top: 20px;">
+								<div class="skeleton-items" style="padding-top: 8px;">
+									{#each Array(3) as _, i}
+										<div class="skeleton-row" style="--delay: {i * 0.12}s"></div>
+									{/each}
+								</div>
+								<div class="result-actions">
+									<button onclick={cancelAnalysis} class="cancel-entry-btn">Cancel</button>
+								</div>
+							</div>
+						</div>
+					{:else if analyzePhase === 'rejected' && analysisRejection}
+						<!-- Rejection card state -->
+						<div id="resultView">
+							<div class="entry-card" style="opacity: 1; margin-top: 20px;">
+								<div class="clarify-card">
+									<p class="clarify-question">{analysisRejection.message}</p>
+								</div>
+								<div class="result-actions">
+									<button onclick={cancelAnalysis} class="save-entry-btn">Try Again</button>
+								</div>
+							</div>
+						</div>
+					{:else if currentAnalysis}
 		<div id="resultView">
 			<div class="day-header" style="margin-top: 0;">
 				<span class="day-title">ANALYSIS RESULT</span>
@@ -472,12 +730,18 @@
 			<div class="entry-card" style="opacity: 1; margin-top: 20px;">
 				<div class="entry-main">
 					<div class="entry-info">
-						<h3 style="font-size: 1.4rem; margin-bottom: 5px;">
+						<h3 style="font-size: 1.4rem; margin-bottom: 8px; line-height: 1.3;">
 							{currentAnalysis.meal_title || currentAnalysis.user_message || 'Meal Analysis'}
 						</h3>
-						<p style="color: #666; font-size: 0.8rem;">
-							{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-						</p>
+						<button
+							class="time-edit-btn"
+							class:active={showTimeSelector}
+							onclick={() => (showTimeSelector = !showTimeSelector)}
+						>
+							<Clock size={14} />
+							<span class="time-edit-text">{displayMealTime}</span>
+							<Pencil size={12} />
+						</button>
 					</div>
 					<div class="entry-macros">
 						{#if !proteinFocused}
@@ -499,27 +763,109 @@
 					</div>
 				</div>
 
-				<div style="margin-top: 30px; border-top: 1px solid #333; padding-top: 20px;">
-					{#each currentAnalysis.items as item, i}
-						<div class="item-row" style="animation: fadeIn 0.5s forwards {i * 0.1}s;">
-							<div class="item-left">
-								<button class="custom-checkbox" onclick={() => toggleItem(i)}>
-									{#if selectedItems.includes(i)}
-										<CheckSquare size={20} />
-									{:else}
-										<Square size={20} />
-									{/if}
-								</button>
-								<span class="item-name">{item.name}</span>
-							</div>
-							<div class="item-macros">
-								<span>{item.protein || 0}g P</span>
-								{#if !proteinFocused}
-									<span>{item.calories} CAL</span>
-								{/if}
-							</div>
+				{#if showTimeSelector}
+					<div class="time-options" style="margin-top: 16px;">
+						<div class="quick-times">
+							<button
+								class="quick-time {selectedMealPeriod === 'current' ? 'active' : ''}"
+								onclick={() => {
+									selectedMealPeriod = 'current';
+									customHour = null;
+									showTimeSelector = false;
+								}}
+							>
+								Now
+							</button>
+							<button
+								class="quick-time {selectedMealPeriod === 'breakfast' ? 'active' : ''}"
+								onclick={() => {
+									selectedMealPeriod = 'breakfast';
+									customHour = null;
+									showTimeSelector = false;
+								}}
+							>
+								8 AM
+							</button>
+							<button
+								class="quick-time {selectedMealPeriod === 'lunch' ? 'active' : ''}"
+								onclick={() => {
+									selectedMealPeriod = 'lunch';
+									customHour = null;
+									showTimeSelector = false;
+								}}
+							>
+								1 PM
+							</button>
+							<button
+								class="quick-time {selectedMealPeriod === 'dinner' ? 'active' : ''}"
+								onclick={() => {
+									selectedMealPeriod = 'dinner';
+									customHour = null;
+									showTimeSelector = false;
+								}}
+							>
+								7 PM
+							</button>
 						</div>
-					{/each}
+						<div class="hour-grid-label">Or pick an hour</div>
+						<div class="hour-grid">
+							{#each Array(24) as _, h}
+								{@const isFuture = h > new Date().getHours()}
+								<button
+									class="hour-pill"
+									class:active={selectedMealPeriod === 'custom' && customHour === h}
+									class:dim={isFuture}
+									disabled={isFuture}
+									onclick={() => {
+										selectedMealPeriod = 'custom';
+										customHour = h;
+										showTimeSelector = false;
+									}}
+								>
+									{fmtHour12(h)}
+								</button>
+							{/each}
+						</div>
+					</div>
+				{/if}
+
+				<div style="margin-top: 30px; border-top: 1px solid #333; padding-top: 20px;">
+					{#if editPhase === 'loading'}
+						<div class="edit-skeleton-list">
+							{#each Array(skeletonRowCount) as _, i}
+								<div class="edit-skeleton-row">
+									<div class="edit-skeleton-bar" style="--delay: {i * 0.08}s"></div>
+								</div>
+							{/each}
+						</div>
+					{:else}
+						<div
+							class="items-container"
+							class:fading-out={editPhase === 'fading-out'}
+							class:fading-in={editPhase === 'fading-in'}
+						>
+							{#each currentAnalysis.items as item, i}
+								<div class="item-row" style="--stagger: {i * 0.07}s">
+									<div class="item-left">
+										<button class="custom-checkbox" onclick={() => toggleItem(i)}>
+											{#if selectedItems.includes(i)}
+												<CheckSquare size={20} />
+											{:else}
+												<Square size={20} />
+											{/if}
+										</button>
+										<span class="item-name">{item.name}</span>
+									</div>
+									<div class="item-macros">
+										<span>{item.protein || 0}g P</span>
+										{#if !proteinFocused}
+											<span>{item.calories} CAL</span>
+										{/if}
+									</div>
+								</div>
+							{/each}
+						</div>
+					{/if}
 				</div>
 
 				{#if currentAnalysis.reasoning}
@@ -533,7 +879,23 @@
 					class="detail-view"
 					style="display: block; margin-top: 30px; padding: 20px; background: #111; border-radius: 8px;"
 				>
-					<div class="chat-bar" style="margin-top: 0;">
+					{#if followupMessages.length > 0}
+						<div class="followup-thread">
+							{#each followupMessages as msg}
+								<div class="followup-msg {msg.role}">
+									<div class="followup-bubble">{msg.content}</div>
+								</div>
+							{/each}
+							{#if isAiLoading}
+								<div class="followup-msg assistant">
+									<div class="followup-bubble typing">
+										<span></span><span></span><span></span>
+									</div>
+								</div>
+							{/if}
+						</div>
+					{/if}
+					<div class="chat-bar" style="margin-top: 0; margin-bottom: 0;">
 						<input
 							type="text"
 							class="chat-input"
@@ -563,95 +925,18 @@
 						</button>
 					</div>
 
-				<!-- Meal Time Selector -->
-				<div style="margin-top: 20px;">
-					<button
-						class="time-selector-btn"
-						onclick={() => (showTimeSelector = !showTimeSelector)}
-					>
-						<Clock size={16} />
-						CHANGE MEAL TIME
-						{#if showTimeSelector}
-							<ChevronUp size={12} />
-						{:else}
-							<ChevronDown size={12} />
-						{/if}
-					</button>
-
-					{#if showTimeSelector}
-						<div class="time-options">
-							<button
-								class="time-option {selectedMealPeriod === 'current' ? 'active' : ''}"
-								onclick={() => {
-									selectedMealPeriod = 'current';
-									customMealTime = null;
-									showTimeSelector = false;
-								}}
-							>
-								Now ({new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})
-							</button>
-							<button
-								class="time-option {selectedMealPeriod === 'breakfast' ? 'active' : ''}"
-								onclick={() => {
-									selectedMealPeriod = 'breakfast';
-									customMealTime = null;
-									showTimeSelector = false;
-								}}
-							>
-								Breakfast (8:00 AM)
-							</button>
-							<button
-								class="time-option {selectedMealPeriod === 'lunch' ? 'active' : ''}"
-								onclick={() => {
-									selectedMealPeriod = 'lunch';
-									customMealTime = null;
-									showTimeSelector = false;
-								}}
-							>
-								Lunch (1:00 PM)
-							</button>
-							<button
-								class="time-option {selectedMealPeriod === 'dinner' ? 'active' : ''}"
-								onclick={() => {
-									selectedMealPeriod = 'dinner';
-									customMealTime = null;
-									showTimeSelector = false;
-								}}
-							>
-								Dinner (7:00 PM)
-							</button>
-							<button
-								class="time-option {selectedMealPeriod === 'custom' ? 'active' : ''}"
-								onclick={() => (selectedMealPeriod = 'custom')}
-							>
-								Custom Time
-							</button>
-
-							{#if selectedMealPeriod === 'custom'}
-								<input
-									type="datetime-local"
-									class="custom-time-input"
-									bind:value={customMealTime}
-									max={new Date().toISOString().slice(0, 16)}
-								/>
-							{/if}
-						</div>
-					{/if}
-				</div>
-
 				</div>
 
 
 
-				<button
-					onclick={commitAnalysis}
-					style="margin-top: 30px; width: 100%; padding: 15px; background: white; color: black; border: none; text-transform: uppercase; letter-spacing: 2px; font-weight: 600; cursor: pointer;"
-				>
-					Save Entry
-				</button>
+				<div class="result-actions">
+					<button onclick={cancelAnalysis} class="cancel-entry-btn">Cancel</button>
+					<button onclick={commitAnalysis} class="save-entry-btn">Save Entry</button>
+				</div>
 			</div>
 		</div>
-	{/if}
+					{/if}
+				{/if}
 			</div>
 		{/if}
 
@@ -663,14 +948,179 @@
 					{historyLoading}
 					{proteinFocused}
 					onDeleteEntry={deleteEntry}
+					onEntryUpdated={async () => {
+						await loadHistory();
+						await loadStats();
+					}}
 				/>
+			</div>
+		{/if}
+
+		<!-- CHAT TAB -->
+		{#if currentTab === 'chat'}
+			<div in:fade={{ duration: 150, delay: 100 }} out:fade={{ duration: 100 }}>
+				<ChatView bind:messages={chatMessages} bind:conversationId={chatConversationId} />
 			</div>
 		{/if}
 	{/key}
 </div>
 
 <style>
+	/* === Item list animation: idle / fading-out / fading-in === */
+	.items-container .item-row {
+		opacity: 1;
+		transition: opacity 0.3s ease;
+		transition-delay: var(--stagger, 0s);
+	}
+	.items-container.fading-out .item-row {
+		opacity: 0;
+	}
+	.items-container.fading-in .item-row {
+		opacity: 0;
+		animation: itemFadeIn 0.35s ease forwards;
+		animation-delay: var(--stagger);
+	}
+	@keyframes itemFadeIn {
+		from { opacity: 0; transform: translateY(4px); }
+		to { opacity: 1; transform: translateY(0); }
+	}
 
+	/* === Edit-with-AI skeleton (one bar per previous item, no horizontal dividers) === */
+	.edit-skeleton-list {
+		display: flex;
+		flex-direction: column;
+	}
+	.edit-skeleton-row {
+		display: flex;
+		align-items: center;
+		padding: 8px 0;
+		min-height: 21px; /* 20px content + 1px to compensate for missing border */
+	}
+	.edit-skeleton-bar {
+		width: 100%;
+		height: 18px;
+		border-radius: 4px;
+		opacity: 0;
+		background: linear-gradient(90deg, #161616 25%, #222 50%, #161616 75%);
+		background-size: 200% 100%;
+		animation: skeletonAppear 0.25s ease var(--delay, 0s) forwards,
+			skeletonShimmer 1.4s linear infinite;
+	}
+
+	/* === Skeleton placeholders (initial analyze loading) === */
+	.skeleton-items {
+		display: flex;
+		flex-direction: column;
+	}
+	.skeleton-row {
+		height: 28px;
+		border-radius: 6px;
+		opacity: 0;
+		margin-bottom: 14px;
+		background: linear-gradient(90deg, #161616 25%, #222 50%, #161616 75%);
+		background-size: 200% 100%;
+		animation: skeletonAppear 0.3s ease var(--delay, 0s) forwards,
+			skeletonShimmer 1.4s linear infinite;
+	}
+	.skeleton-row:last-child { margin-bottom: 0; }
+	.skeleton-title {
+		height: 24px;
+		width: 65%;
+		border-radius: 6px;
+		margin-bottom: 12px;
+		background: linear-gradient(90deg, #161616 25%, #222 50%, #161616 75%);
+		background-size: 200% 100%;
+		animation: skeletonShimmer 1.4s linear infinite;
+	}
+	.skeleton-pill {
+		height: 28px;
+		width: 110px;
+		border-radius: 6px;
+		background: linear-gradient(90deg, #161616 25%, #222 50%, #161616 75%);
+		background-size: 200% 100%;
+		animation: skeletonShimmer 1.4s linear infinite;
+	}
+	.skeleton-macro {
+		height: 22px;
+		width: 60px;
+		border-radius: 4px;
+		margin-bottom: 6px;
+		background: linear-gradient(90deg, #161616 25%, #222 50%, #161616 75%);
+		background-size: 200% 100%;
+		animation: skeletonShimmer 1.4s linear infinite;
+	}
+	@keyframes skeletonAppear { to { opacity: 1; } }
+	@keyframes skeletonShimmer {
+		0% { background-position: 100% 0; }
+		100% { background-position: -100% 0; }
+	}
+
+	/* === Clarification / rejection cards === */
+	.clarify-card {
+		display: flex;
+		flex-direction: column;
+		gap: 14px;
+	}
+	.clarify-question {
+		margin: 0;
+		color: #eaeaea;
+		font-size: 1rem;
+		line-height: 1.45;
+	}
+	.clarify-options {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		margin-top: 2px;
+	}
+	.clarify-option {
+		background: #1a1a1a;
+		border: 1px solid #2a2a2a;
+		color: #eaeaea;
+		padding: 12px 14px;
+		border-radius: 8px;
+		cursor: pointer;
+		text-align: left;
+		font-size: 0.92rem;
+		transition: background 0.15s, border-color 0.15s;
+	}
+	.clarify-option:hover {
+		background: #232323;
+		border-color: #3a3a3a;
+	}
+	.clarify-option.other {
+		color: #888;
+		font-style: italic;
+	}
+	.clarify-other-form {
+		display: flex;
+		gap: 8px;
+	}
+	.clarify-other-input {
+		flex: 1;
+		background: #1a1a1a;
+		border: 1px solid #2a2a2a;
+		color: #eaeaea;
+		padding: 10px 12px;
+		border-radius: 8px;
+		font-size: 0.9rem;
+		outline: none;
+	}
+	.clarify-other-input:focus { border-color: #4ade80; }
+	.clarify-other-submit {
+		background: #fff;
+		color: #000;
+		border: none;
+		padding: 0 18px;
+		border-radius: 8px;
+		font-weight: 600;
+		cursor: pointer;
+	}
+	.clarify-other-submit:disabled {
+		background: #2a2a2a;
+		color: #555;
+		cursor: not-allowed;
+	}
 
 	.spinner {
 		width: 40px;
@@ -780,72 +1230,120 @@
 		border-color: #333;
 	}
 
-	.time-selector-btn {
-		background: transparent;
-		border: 1px solid var(--border);
-		color: var(--text);
-		padding: 0.75rem 1rem;
-		border-radius: 8px;
-		cursor: pointer;
-		transition: all 0.2s;
-		width: 100%;
-		display: flex;
+	.time-edit-btn {
+		display: inline-flex;
 		align-items: center;
-		justify-content: center;
 		gap: 0.5rem;
-		font-size: 0.875rem;
+		background: transparent;
+		border: 1px solid #2a2a2a;
+		color: #ddd;
+		padding: 0.5rem 0.85rem;
+		border-radius: 6px;
+		cursor: pointer;
+		font-family: inherit;
+		font-size: 1rem;
+		font-weight: 600;
+		font-variant-numeric: tabular-nums;
+		letter-spacing: 0.02em;
+		transition: all 0.15s;
 	}
 
-	.time-selector-btn:hover {
+	.time-edit-btn:hover {
 		background: #111;
-		border-color: #333;
+		border-color: #3a3a3a;
+		color: #fff;
+	}
+
+	.time-edit-btn.active {
+		border-color: #4ade80;
+		color: #4ade80;
+		background: #0d0d0d;
+	}
+
+	.time-edit-text {
+		font-size: 1rem;
 	}
 
 	.time-options {
 		margin-top: 0.75rem;
 		display: flex;
 		flex-direction: column;
-		gap: 0.5rem;
+		gap: 0.75rem;
 		animation: fadeIn 0.2s ease-out;
 	}
 
-	.time-option {
+	.quick-times {
+		display: grid;
+		grid-template-columns: repeat(4, 1fr);
+		gap: 0.5rem;
+	}
+
+	.quick-time {
 		background: #111;
 		border: 1px solid var(--border);
 		color: var(--text);
-		padding: 0.75rem;
+		padding: 0.6rem 0.4rem;
 		border-radius: 6px;
 		cursor: pointer;
-		transition: all 0.2s;
-		font-size: 0.875rem;
-		text-align: left;
+		transition: all 0.15s;
+		font-size: 0.85rem;
+		font-weight: 500;
+		text-align: center;
 	}
 
-	.time-option:hover {
+	.quick-time:hover {
 		background: #1a1a1a;
 		border-color: #444;
 	}
 
-	.time-option.active {
+	.quick-time.active {
 		background: #1a1a1a;
 		border-color: #4ade80;
 		color: #4ade80;
 	}
 
-	.custom-time-input {
+	.hour-grid-label {
+		font-size: 0.65rem;
+		font-weight: 600;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: #666;
+		margin-top: 0.25rem;
+	}
+
+	.hour-grid {
+		display: grid;
+		grid-template-columns: repeat(6, 1fr);
+		gap: 0.35rem;
+	}
+
+	.hour-pill {
 		background: #111;
 		border: 1px solid var(--border);
 		color: var(--text);
-		padding: 0.75rem;
-		border-radius: 6px;
-		font-size: 0.875rem;
-		width: 100%;
-		margin-top: 0.5rem;
+		padding: 0.45rem 0.2rem;
+		border-radius: 5px;
+		cursor: pointer;
+		transition: all 0.15s;
+		font-size: 0.75rem;
+		font-weight: 500;
+		text-align: center;
 	}
 
-	.custom-time-input:focus {
-		outline: none;
+	.hour-pill:hover:not(:disabled) {
+		background: #1a1a1a;
+		border-color: #444;
+	}
+
+	.hour-pill.active {
+		background: #1a1a1a;
 		border-color: #4ade80;
+		color: #4ade80;
+	}
+
+	.hour-pill.dim {
+		opacity: 0.3;
+		cursor: not-allowed;
 	}
 
 	/* Tab Bar */
@@ -913,6 +1411,129 @@
 
 	.custom-checkbox:active {
 		transform: scale(0.95);
+	}
+
+	.followup-thread {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		margin-bottom: 16px;
+		max-height: 280px;
+		overflow-y: auto;
+		padding-right: 4px;
+	}
+
+	.followup-msg {
+		display: flex;
+		animation: fadeIn 0.25s ease-out;
+	}
+
+	.followup-msg.user {
+		justify-content: flex-end;
+	}
+
+	.followup-msg.assistant {
+		justify-content: flex-start;
+	}
+
+	.followup-bubble {
+		max-width: 85%;
+		padding: 10px 14px;
+		border-radius: 14px;
+		font-size: 0.9rem;
+		line-height: 1.4;
+		white-space: pre-wrap;
+		word-wrap: break-word;
+	}
+
+	.followup-msg.user .followup-bubble {
+		background: #fff;
+		color: #000;
+		border-bottom-right-radius: 4px;
+	}
+
+	.followup-msg.assistant .followup-bubble {
+		background: #1a1a1a;
+		color: #fff;
+		border: 1px solid #2a2a2a;
+		border-bottom-left-radius: 4px;
+	}
+
+	.followup-bubble.typing {
+		display: inline-flex;
+		gap: 4px;
+		align-items: center;
+		padding: 12px 14px;
+	}
+
+	.followup-bubble.typing span {
+		width: 6px;
+		height: 6px;
+		background: #888;
+		border-radius: 50%;
+		animation: typing 1.2s infinite ease-in-out;
+	}
+
+	.followup-bubble.typing span:nth-child(2) {
+		animation-delay: 0.15s;
+	}
+
+	.followup-bubble.typing span:nth-child(3) {
+		animation-delay: 0.3s;
+	}
+
+	.result-actions {
+		margin-top: 30px;
+		display: flex;
+		gap: 10px;
+	}
+
+	.cancel-entry-btn,
+	.save-entry-btn {
+		flex: 1;
+		padding: 15px;
+		border: none;
+		text-transform: uppercase;
+		letter-spacing: 2px;
+		font-weight: 600;
+		font-size: 0.85rem;
+		cursor: pointer;
+		border-radius: 4px;
+		transition: opacity 0.15s;
+	}
+
+	.cancel-entry-btn {
+		flex: 0 0 35%;
+		background: transparent;
+		color: #aaa;
+		border: 1px solid #333;
+	}
+
+	.cancel-entry-btn:hover {
+		color: #fff;
+		border-color: #555;
+	}
+
+	.save-entry-btn {
+		background: white;
+		color: black;
+	}
+
+	.save-entry-btn:hover {
+		opacity: 0.9;
+	}
+
+	@keyframes typing {
+		0%,
+		60%,
+		100% {
+			opacity: 0.3;
+			transform: translateY(0);
+		}
+		30% {
+			opacity: 1;
+			transform: translateY(-3px);
+		}
 	}
 
 

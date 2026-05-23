@@ -23,22 +23,35 @@ export async function POST({ request, locals, platform }) {
         return json({ error: 'Either entryId or messages must be provided' }, { status: 400 });
     }
 
-    // Add user message
+    const editSystemPrompt = `The user previously described a meal (via text, photo, and/or voice) and you analyzed it into a structured log via the log_meal tool — the prior conversation contains it. The user is now editing that result: adding/removing items, fixing portions, renaming, or correcting macro estimates. You are revising an existing analysis, not analyzing new food.
+
+How to respond:
+- Default to action: when the user's change is reasonably clear, call update_log with the COMPLETE updated list of items (not a diff). Include meal_title if the name should change.
+- update_log has an optional 'message' field — use it ONLY when you made a non-obvious assumption the user should know about (e.g. "Assumed 2 tbsp of peanut butter."). Omit it otherwise. Never use it for closing pleasantries like "let me know if you want anything else" — those are forbidden.
+- Reply with text only when the request is genuinely ambiguous and you need a clarifying question. Keep it short and specific.
+- Apply standard nutritionist judgement for portions — don't pester the user for details a reasonable estimate can cover.
+- Be terse.`;
+
+    if (conversation.length > 0 && conversation[0].role === 'system') {
+        conversation[0] = { role: 'system', content: editSystemPrompt };
+    } else {
+        conversation.unshift({ role: 'system', content: editSystemPrompt });
+    }
+
     conversation.push({ role: 'user', content: message });
 
-    // Define Tools
     const tools = [
         {
             type: 'function',
             function: {
                 name: 'update_log',
-                description: 'Update the food log entry details. Provide updated items with their macros. Include meal_title if the meal name should change.',
+                description: 'Replace the meal log with an updated list of items. Use when you can apply the requested change.',
                 parameters: {
                     type: 'object',
                     properties: {
                         meal_title: {
                             type: 'string',
-                            description: 'Updated name/title for the meal'
+                            description: 'Updated meal title. Only include if the name should change.'
                         },
                         items: {
                             type: 'array',
@@ -52,6 +65,10 @@ export async function POST({ request, locals, platform }) {
                                 },
                                 required: ['name', 'calories', 'protein', 'carbs']
                             }
+                        },
+                        message: {
+                            type: 'string',
+                            description: 'Optional SHORT note about a non-obvious assumption you made (e.g. "Assumed 2 tbsp of peanut butter"). Omit unless truly informative. Never use for pleasantries or closing remarks.'
                         }
                     },
                     required: ['items']
@@ -63,61 +80,39 @@ export async function POST({ request, locals, platform }) {
     const responseData = await callOpenRouter(platform.env, conversation, tools, 'auto');
     const choice = responseData.choices[0];
     const responseMsg = choice.message;
-
     conversation.push(responseMsg);
 
     let updatedEntry = null;
+    let toolMessage = null;
+    const reasoning = responseMsg.reasoning || responseMsg.thought || null;
 
-    // Check for tool calls
     if (responseMsg.tool_calls) {
         for (const toolCall of responseMsg.tool_calls) {
-            if (toolCall.function.name === 'update_log') {
-                const args = JSON.parse(toolCall.function.arguments);
+            if (toolCall.function.name !== 'update_log') continue;
 
-                // Calculate totals from updated items
-                const items = args.items || [];
-                const total_calories = items.reduce((sum, item) => sum + (item.calories || 0), 0);
-                const total_protein = Math.round(items.reduce((sum, item) => sum + (item.protein || 0), 0));
-                const total_carbs = items.reduce((sum, item) => sum + (item.carbs || 0), 0);
+            const args = JSON.parse(toolCall.function.arguments);
+            const items = args.items || [];
+            const total_calories = items.reduce((sum, item) => sum + (item.calories || 0), 0);
+            const total_protein = Math.round(items.reduce((sum, item) => sum + (item.protein || 0), 0));
+            const total_carbs = items.reduce((sum, item) => sum + (item.carbs || 0), 0);
 
-                if (entry) {
-                    const newEntry = {
-                        ...entry,
-                        items,
-                        total_calories,
-                        total_protein,
-                        total_carbs
-                    };
+            if (args.message) toolMessage = args.message;
 
-                    // Update meal title if provided
-                    if (args.meal_title) {
-                        newEntry.meal_title = args.meal_title;
-                    }
-
-                    await locals.storage.saveEntry(newEntry, locals.user.id);
-                    updatedEntry = newEntry;
-                } else {
-                    // For stateless/unsaved entries, we just return the new content
-                    updatedEntry = {
-                        items,
-                        total_calories,
-                        total_protein,
-                        total_carbs
-                    };
-
-                    // Update meal title if provided
-                    if (args.meal_title) {
-                        updatedEntry.meal_title = args.meal_title;
-                    }
-                }
-
-                // Add tool result to conversation
-                conversation.push({
-                    role: 'tool',
-                    tool_call_id: toolCall.id,
-                    content: JSON.stringify({ success: true, message: "Log updated successfully" })
-                });
+            if (entry) {
+                const newEntry = { ...entry, items, total_calories, total_protein, total_carbs };
+                if (args.meal_title) newEntry.meal_title = args.meal_title;
+                await locals.storage.saveEntry(newEntry, locals.user.id);
+                updatedEntry = newEntry;
+            } else {
+                updatedEntry = { items, total_calories, total_protein, total_carbs };
+                if (args.meal_title) updatedEntry.meal_title = args.meal_title;
             }
+        }
+
+        // If the model attached an optional message, keep it in conversation so
+        // the transcript reflects what the user saw.
+        if (toolMessage) {
+            conversation.push({ role: 'assistant', content: toolMessage });
         }
     }
 
@@ -125,26 +120,11 @@ export async function POST({ request, locals, platform }) {
         await locals.storage.updateConversation(entryId, conversation, null, null);
     }
 
-    // If we had tool calls, we should call the model one more time to get a final response
-    let finalResponseMsg = responseMsg;
-    let finalReasoning = responseMsg.reasoning || responseMsg.thought || null;
-
-    if (responseMsg.tool_calls) {
-        const finalResponseData = await callOpenRouter(platform.env, conversation, tools, 'auto');
-        finalResponseMsg = finalResponseData.choices[0].message;
-        finalReasoning = finalResponseMsg.reasoning || finalResponseMsg.thought || null;
-        conversation.push(finalResponseMsg);
-
-        if (entryId) {
-            await locals.storage.updateConversation(entryId, conversation, null, null);
-        }
-    }
-
     return json({
         role: 'assistant',
-        content: finalResponseMsg.content,
-        reasoning: finalReasoning,
-        updatedEntry: updatedEntry,
+        content: toolMessage || responseMsg.content || null,
+        reasoning,
+        updatedEntry,
         messages: conversation
     });
 }

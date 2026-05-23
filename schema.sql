@@ -49,6 +49,35 @@ CREATE TABLE IF NOT EXISTS nutrition_entries (
 CREATE INDEX IF NOT EXISTS idx_nutrition_entries_timestamp ON nutrition_entries(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_nutrition_entries_user_id ON nutrition_entries(user_id);
 
+-- QR login requests table
+CREATE TABLE IF NOT EXISTS qr_login_requests (
+  qr_id TEXT PRIMARY KEY,
+  device_secret_hash TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  user_id TEXT,
+  session_token TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  expires_at DATETIME NOT NULL,
+  created_ip TEXT,
+  created_ua TEXT,
+  created_country TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_qr_login_expires_at ON qr_login_requests(expires_at);
+
+-- Chat conversations table
+CREATE TABLE IF NOT EXISTS chat_conversations (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  title TEXT,
+  messages TEXT, -- JSON array of {role, content, reasoning, toolEvents, thinkingMs}
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_conversations_user_updated ON chat_conversations(user_id, updated_at DESC);
+
 -- User settings table
 CREATE TABLE IF NOT EXISTS user_settings (
   user_id TEXT PRIMARY KEY,
@@ -62,6 +91,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
   maintenance_calories INTEGER,
   protein_goal INTEGER DEFAULT 150,
   protein_focused_mode INTEGER DEFAULT 0,
+  goals TEXT,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );

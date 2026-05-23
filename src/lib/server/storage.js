@@ -47,6 +47,7 @@ export class Storage {
         id, user_id, timestamp, user_message, meal_title, total_calories, total_protein, total_carbs, items
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
+        timestamp = excluded.timestamp,
         meal_title = excluded.meal_title,
         total_calories = excluded.total_calories,
         total_protein = excluded.total_protein,
@@ -84,6 +85,23 @@ export class Storage {
         return results.map(row => ({
             ...row,
             items: row.items ? JSON.parse(row.items) : []
+        }));
+    }
+
+    async getEntriesBetween(userId, startISO, endISO) {
+        if (!this.db) return [];
+        if (!userId) throw new Error('userId is required');
+
+        const { results } = await this.db.prepare(`
+            SELECT id, timestamp, meal_title, total_calories, total_protein, total_carbs, items
+            FROM nutrition_entries
+            WHERE user_id = ? AND timestamp >= ? AND timestamp <= ?
+            ORDER BY timestamp ASC
+        `).bind(userId, startISO, endISO).all();
+
+        return results.map(r => ({
+            ...r,
+            items: r.items ? JSON.parse(r.items) : []
         }));
     }
 
@@ -170,12 +188,12 @@ export class Storage {
             throw new Error('userId is required');
         }
 
-        const { weight, weight_unit, height, height_unit, age, gender, activity_level, maintenance_calories, protein_goal, protein_focused_mode } = settings;
+        const { weight, weight_unit, height, height_unit, age, gender, activity_level, maintenance_calories, protein_goal, protein_focused_mode, goals } = settings;
 
         await this.db.prepare(`
             INSERT INTO user_settings (
-                user_id, weight, weight_unit, height, height_unit, age, gender, activity_level, maintenance_calories, protein_goal, protein_focused_mode, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                user_id, weight, weight_unit, height, height_unit, age, gender, activity_level, maintenance_calories, protein_goal, protein_focused_mode, goals, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(user_id) DO UPDATE SET
                 weight = excluded.weight,
                 weight_unit = excluded.weight_unit,
@@ -187,6 +205,7 @@ export class Storage {
                 maintenance_calories = excluded.maintenance_calories,
                 protein_goal = excluded.protein_goal,
                 protein_focused_mode = excluded.protein_focused_mode,
+                goals = excluded.goals,
                 updated_at = CURRENT_TIMESTAMP
         `).bind(
             userId,
@@ -199,7 +218,8 @@ export class Storage {
             activity_level || null,
             maintenance_calories || null,
             protein_goal || 150,
-            protein_focused_mode || 0
+            protein_focused_mode || 0,
+            goals || null
         ).run();
 
         // Invalidate cache when settings are updated
@@ -211,23 +231,96 @@ export class Storage {
         return await this.getUserSettings(userId);
     }
 
-    async getStats(userId, clientDate = null) {
+    // --- Chat conversations ---
+
+    async createChatConversation(userId, title) {
+        if (!userId) throw new Error('userId is required');
+        const id = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+        await this.db.prepare(`
+            INSERT INTO chat_conversations (id, user_id, title, messages, created_at, updated_at)
+            VALUES (?, ?, ?, '[]', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        `).bind(id, userId, title || null).run();
+        return id;
+    }
+
+    async saveChatConversation(id, userId, messages, title = null) {
+        if (!userId) throw new Error('userId is required');
+        if (!id) throw new Error('conversation id is required');
+        const payload = JSON.stringify(messages || []);
+        await this.db.prepare(`
+            INSERT INTO chat_conversations (id, user_id, title, messages, created_at, updated_at)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT(id) DO UPDATE SET
+                messages = excluded.messages,
+                title = COALESCE(excluded.title, chat_conversations.title),
+                updated_at = CURRENT_TIMESTAMP
+            WHERE chat_conversations.user_id = excluded.user_id
+        `).bind(id, userId, title, payload).run();
+    }
+
+    async listChatConversations(userId, limit = 50) {
+        if (!userId) throw new Error('userId is required');
+        const { results } = await this.db.prepare(`
+            SELECT id, title, updated_at, created_at
+            FROM chat_conversations
+            WHERE user_id = ?
+            ORDER BY updated_at DESC
+            LIMIT ?
+        `).bind(userId, limit).all();
+        return results;
+    }
+
+    async getChatConversation(id, userId) {
+        if (!userId) throw new Error('userId is required');
+        const row = await this.db.prepare(`
+            SELECT id, title, messages, updated_at, created_at
+            FROM chat_conversations
+            WHERE id = ? AND user_id = ?
+        `).bind(id, userId).first();
+        if (!row) return null;
+        return {
+            ...row,
+            messages: row.messages ? JSON.parse(row.messages) : []
+        };
+    }
+
+    async deleteChatConversation(id, userId) {
+        if (!userId) throw new Error('userId is required');
+        await this.db.prepare(`
+            DELETE FROM chat_conversations WHERE id = ? AND user_id = ?
+        `).bind(id, userId).run();
+        return true;
+    }
+
+    async getStats(userId, clientDate = null, tz = 'UTC') {
         if (!this.db) return null;
 
         if (!userId) {
             throw new Error('userId is required');
         }
 
-        // Use client-provided date or fallback to UTC
-        const now = clientDate ? new Date(clientDate) : new Date();
-        const year = now.getFullYear();
-        const month = String(now.getMonth() + 1).padStart(2, '0');
-        const day = String(now.getDate()).padStart(2, '0');
-        const todayStart = `${year}-${month}-${day}T00:00:00`;
-        const todayEnd = `${year}-${month}-${day}T23:59:59`;
+        // Determine today's YYYY-MM-DD string. clientDate (legacy query param) wins
+        // when provided; otherwise compute from the user's timezone via Intl.
+        let todayYmd;
+        if (clientDate) {
+            // clientDate format: "YYYY-MM-DD" — already local to the user
+            todayYmd = clientDate.split('T')[0];
+        } else {
+            // en-CA gives YYYY-MM-DD natively
+            todayYmd = new Intl.DateTimeFormat('en-CA', {
+                timeZone: tz,
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit'
+            }).format(new Date());
+        }
+        const todayStart = `${todayYmd}T00:00:00`;
+        const todayEnd = `${todayYmd}T23:59:59`;
 
-        // Get start of week (Sunday)
-        const startOfWeek = new Date(now);
+        // Get start of week (Sunday) — derive from todayYmd treated as a calendar date
+        const [yy, mm, dd] = todayYmd.split('-').map(Number);
+        const todayDate = new Date(yy, mm - 1, dd);
+        const startOfWeek = new Date(todayDate);
         startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
         const weekYear = startOfWeek.getFullYear();
         const weekMonth = String(startOfWeek.getMonth() + 1).padStart(2, '0');

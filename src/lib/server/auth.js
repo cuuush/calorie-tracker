@@ -248,11 +248,134 @@ export class Auth {
             DELETE FROM sessions
             WHERE expires_at < ?
         `).bind(now).run();
+
+        // Delete expired QR login requests
+        await this.db.prepare(`
+            DELETE FROM qr_login_requests
+            WHERE expires_at < ?
+        `).bind(now).run();
     }
 
     // Get user by ID
     async getUser(userId) {
         return await this.db.prepare('SELECT id, email, created_at FROM users WHERE id = ?')
             .bind(userId).first();
+    }
+
+    // SHA-256 hash → hex
+    async hashSecret(secret) {
+        const data = new TextEncoder().encode(secret);
+        const buf = await crypto.subtle.digest('SHA-256', data);
+        return Array.from(new Uint8Array(buf))
+            .map(b => b.toString(16).padStart(2, '0'))
+            .join('');
+    }
+
+    // Generate a shorter token (16 bytes = 32 hex chars) for QR ids
+    generateShortToken() {
+        const bytes = new Uint8Array(16);
+        crypto.getRandomValues(bytes);
+        return Array.from(bytes)
+            .map(b => b.toString(16).padStart(2, '0'))
+            .join('');
+    }
+
+    // Create a QR login request. Returns the qr_id (shown in QR) and device_secret
+    // (kept by the originating browser; required to claim the session).
+    async createQrRequest({ ip, ua, country }) {
+        const qrId = this.generateShortToken();
+        const deviceSecret = this.generateToken();
+        const deviceSecretHash = await this.hashSecret(deviceSecret);
+        const expiresAt = new Date(Date.now() + 2 * 60 * 1000); // 2 minutes
+
+        await this.db.prepare(`
+            INSERT INTO qr_login_requests
+                (qr_id, device_secret_hash, status, expires_at, created_ip, created_ua, created_country)
+            VALUES (?, ?, 'pending', ?, ?, ?, ?)
+        `).bind(qrId, deviceSecretHash, expiresAt.toISOString(), ip || null, ua || null, country || null).run();
+
+        return { qr_id: qrId, device_secret: deviceSecret, expires_at: expiresAt.toISOString() };
+    }
+
+    // Fetch a QR request row (used by the phone's approval page).
+    async getQrRequest(qrId) {
+        if (!qrId) return null;
+        return await this.db.prepare(`
+            SELECT qr_id, status, created_ip, created_ua, created_country, expires_at
+            FROM qr_login_requests
+            WHERE qr_id = ?
+        `).bind(qrId).first();
+    }
+
+    // Phone approves: create a session and stash its token on the row.
+    async approveQrRequest(qrId, userId) {
+        const row = await this.db.prepare(`
+            SELECT status, expires_at FROM qr_login_requests WHERE qr_id = ?
+        `).bind(qrId).first();
+
+        if (!row) return { error: 'not_found' };
+        if (row.status !== 'pending') return { error: 'already_handled' };
+        if (new Date(row.expires_at) < new Date()) return { error: 'expired' };
+
+        const sessionToken = this.generateToken();
+        const sessionExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+        await this.db.prepare(`
+            INSERT INTO sessions (token, user_id, expires_at)
+            VALUES (?, ?, ?)
+        `).bind(sessionToken, userId, sessionExpiresAt.toISOString()).run();
+
+        await this.db.prepare(`
+            UPDATE qr_login_requests
+            SET status = 'approved', user_id = ?, session_token = ?
+            WHERE qr_id = ? AND status = 'pending'
+        `).bind(userId, sessionToken, qrId).run();
+
+        return { success: true };
+    }
+
+    // Phone denies: mark the row denied.
+    async denyQrRequest(qrId) {
+        const row = await this.db.prepare(`
+            SELECT status FROM qr_login_requests WHERE qr_id = ?
+        `).bind(qrId).first();
+        if (!row) return { error: 'not_found' };
+        if (row.status !== 'pending') return { error: 'already_handled' };
+
+        await this.db.prepare(`
+            UPDATE qr_login_requests
+            SET status = 'denied'
+            WHERE qr_id = ? AND status = 'pending'
+        `).bind(qrId).run();
+        return { success: true };
+    }
+
+    // Laptop polls: validate both tokens, return status, hand over session on first claim.
+    async claimQrSession(qrId, deviceSecret) {
+        if (!qrId || !deviceSecret) return { status: 'invalid' };
+
+        const row = await this.db.prepare(`
+            SELECT status, device_secret_hash, session_token, expires_at
+            FROM qr_login_requests
+            WHERE qr_id = ?
+        `).bind(qrId).first();
+
+        if (!row) return { status: 'expired' };
+
+        const submittedHash = await this.hashSecret(deviceSecret);
+        if (submittedHash !== row.device_secret_hash) return { status: 'invalid' };
+
+        if (new Date(row.expires_at) < new Date()) {
+            await this.db.prepare('DELETE FROM qr_login_requests WHERE qr_id = ?').bind(qrId).run();
+            return { status: 'expired' };
+        }
+
+        if (row.status === 'approved') {
+            const sessionToken = row.session_token;
+            await this.db.prepare('DELETE FROM qr_login_requests WHERE qr_id = ?').bind(qrId).run();
+            return { status: 'approved', session_token: sessionToken };
+        }
+
+        return { status: row.status }; // 'pending' or 'denied'
     }
 }

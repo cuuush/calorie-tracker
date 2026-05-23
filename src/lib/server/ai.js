@@ -1,11 +1,11 @@
-export async function callOpenRouter(env, messages, tools = null, toolChoice = 'auto') {
+export async function callOpenRouter(env, messages, tools = null, toolChoice = 'auto', model = 'google/gemini-3-flash-preview') {
     // Debug mode: return canned responses for testing
     if (env.DEBUG_MODE === 'true') {
         return getCannedResponse(tools);
     }
 
     const body = {
-        model: 'google/gemini-3-flash-preview',
+        model,
         messages: messages,
         reasoning: {
             enabled: true

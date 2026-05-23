@@ -3,6 +3,8 @@
 	import { goto } from '$app/navigation';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { ArrowLeft } from 'lucide-svelte';
+	import { toast } from '$lib/toast.svelte.js';
+	import { fetchWithRetry } from '$lib/net.js';
 
 	let loading = $state(true);
 	let isSaving = $state(false);
@@ -17,7 +19,8 @@
 		activity_level: '',
 		maintenance_calories: '',
 		protein_goal: 150,
-		protein_focused_mode: 0
+		protein_focused_mode: 0,
+		goals: ''
 	});
 
 	// Separate feet/inches for height input
@@ -47,7 +50,7 @@
 
 	onMount(async () => {
 		try {
-			const response = await fetch('/api/settings');
+			const response = await fetchWithRetry('/api/settings');
 			if (response.ok) {
 				const data = await response.json();
 				if (data && Object.keys(data).length > 0) {
@@ -76,7 +79,7 @@
 		}
 
 		if (!weight || !height || !settings.age || !settings.gender || !settings.activity_level) {
-			alert('Please fill in all fields to calculate TDEE');
+			toast('Please fill in all fields to calculate TDEE');
 			return;
 		}
 
@@ -101,7 +104,7 @@
 
 	function calculateProteinGoal() {
 		if (!settings.weight) {
-			alert('Please enter your weight to calculate protein goal');
+			toast('Please enter your weight to calculate protein goal');
 			return;
 		}
 
@@ -131,10 +134,11 @@
 					settings.height = (parseInt(heightFeet) || 0) * 12 + (parseInt(heightInches) || 0);
 				}
 
-				const response = await fetch('/api/settings', {
+				const response = await fetchWithRetry('/api/settings', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify(settings)
+					body: JSON.stringify(settings),
+					silent: true
 				});
 
 				if (!response.ok) {
@@ -148,10 +152,16 @@
 		}, 500);
 	}
 
+	async function logout() {
+		if (!confirm('Are you sure you want to log out?')) return;
+		await fetch('/auth/logout', { method: 'POST' });
+		window.location.href = '/login';
+	}
+
 	async function exportHistory() {
 		isExporting = true;
 		try {
-			const response = await fetch('/api/export');
+			const response = await fetchWithRetry('/api/export');
 			if (!response.ok) {
 				throw new Error('Export failed');
 			}
@@ -169,7 +179,7 @@
 			URL.revokeObjectURL(url);
 		} catch (error) {
 			console.error('Export failed:', error);
-			alert('Failed to export history. Please try again.');
+			toast('Failed to export history. Please try again.', { kind: 'error' });
 		} finally {
 			isExporting = false;
 		}
@@ -215,6 +225,23 @@
 							<span class="slider"></span>
 						</label>
 					</label>
+				</div>
+			</section>
+
+			<!-- Goals Section -->
+			<section class="settings-section">
+				<h2>Goals</h2>
+				<div class="form-group">
+					<label for="goals">What are you working toward?</label>
+					<textarea
+						id="goals"
+						class="goals-textarea"
+						rows="3"
+						bind:value={settings.goals}
+						oninput={autoSave}
+						placeholder="e.g. lose 10 lbs while gaining muscle, hit 150g protein daily, maintain weight..."
+					></textarea>
+					<span class="helper-text">The chat assistant will tailor its recommendations to this.</span>
 				</div>
 			</section>
 
@@ -362,6 +389,16 @@
 					<span class="helper-text">Download all your meal data in LLM-friendly JSON format</span>
 				</div>
 			</section>
+
+			<!-- Account Section -->
+			<section class="settings-section">
+				<h2>Account</h2>
+				<div class="form-group">
+					<button type="button" class="logout-btn" onclick={logout}>
+						LOG OUT
+					</button>
+				</div>
+			</section>
 		</div>
 	{/if}
 </div>
@@ -458,7 +495,8 @@
 
 	input[type="number"],
 	input[type="text"],
-	select {
+	select,
+	textarea {
 		background: #0a0a0a;
 		border: 1px solid var(--border);
 		color: var(--text);
@@ -466,10 +504,19 @@
 		border-radius: 8px;
 		font-size: 1rem;
 		transition: all 0.2s;
+		font-family: inherit;
+	}
+
+	.goals-textarea {
+		width: 100%;
+		min-height: 84px;
+		resize: vertical;
+		line-height: 1.45;
 	}
 
 	input:focus,
-	select:focus {
+	select:focus,
+	textarea:focus {
 		outline: none;
 		border-color: #444;
 		background: #111;
@@ -648,5 +695,25 @@
 	.export-btn:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
+	}
+
+	.logout-btn {
+		background: transparent;
+		border: 1px solid #2a1414;
+		color: #ff5252;
+		padding: 0.75rem 1.5rem;
+		border-radius: 8px;
+		font-size: 0.875rem;
+		font-weight: 600;
+		letter-spacing: 0.1em;
+		cursor: pointer;
+		transition: all 0.2s;
+		text-transform: uppercase;
+	}
+
+	.logout-btn:hover {
+		background: #ff4444;
+		color: #000;
+		border-color: #ff4444;
 	}
 </style>
