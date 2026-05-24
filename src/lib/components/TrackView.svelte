@@ -1,11 +1,13 @@
 <script>
 	import { Camera, Mic, Square, Send } from 'lucide-svelte';
 	import DailyStats from './DailyStats.svelte';
+	import { uploadFile } from '$lib/net.js';
+	import { toast } from '$lib/toast.svelte.js';
 
 	let {
 		userMessage = $bindable(),
-		selectedFile = $bindable(),
-		selectedAudio = $bindable(),
+		selectedImages = $bindable([]),
+		selectedAudio = $bindable(null),
 		isRecording = $bindable(),
 		isAiLoading,
 		placeholder,
@@ -16,7 +18,6 @@
 		proteinFocused,
 		onAnalyze,
 		onToggleMic,
-		onFileSelect,
 		onMealSelect
 	} = $props();
 
@@ -25,9 +26,8 @@
 	let searchTimeout;
 	let showSearchResults = $state(false);
 	let selectedIndex = $state(-1);
-	let searchActive = $state(true); // Track if search should be active
+	let searchActive = $state(true);
 
-	// Debounced search function
 	async function searchMeals(query) {
 		clearTimeout(searchTimeout);
 
@@ -38,7 +38,6 @@
 		}
 
 		searchTimeout = setTimeout(async () => {
-			// Double-check searchActive before showing results
 			if (!searchActive) return;
 
 			try {
@@ -54,18 +53,97 @@
 		}, 300);
 	}
 
+	function nano() {
+		return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+	}
+
+	function startImageUpload(imgState) {
+		uploadFile('/api/upload', imgState.file, {
+			onProgress: (frac) => {
+				const idx = selectedImages.findIndex((s) => s.id === imgState.id);
+				if (idx === -1) return;
+				selectedImages[idx] = { ...selectedImages[idx], progress: frac };
+			}
+		})
+			.then((res) => {
+				const idx = selectedImages.findIndex((s) => s.id === imgState.id);
+				if (idx === -1) return;
+				selectedImages[idx] = { ...selectedImages[idx], key: res.key, mime: res.mime, progress: 1 };
+			})
+			.catch((err) => {
+				const idx = selectedImages.findIndex((s) => s.id === imgState.id);
+				if (idx === -1) return;
+				selectedImages[idx] = { ...selectedImages[idx], error: err.message || 'Upload failed' };
+				toast('Image upload failed', { kind: 'error' });
+			});
+	}
+
+	function handleFileSelect(files) {
+		const list = Array.from(files || []);
+		const added = list.map((file) => ({
+			id: nano(),
+			file,
+			progress: 0,
+			thumb: URL.createObjectURL(file)
+		}));
+		selectedImages = [...selectedImages, ...added];
+		added.forEach(startImageUpload);
+	}
+
+	function removeImage(id) {
+		const found = selectedImages.find((s) => s.id === id);
+		if (found?.thumb) URL.revokeObjectURL(found.thumb);
+		selectedImages = selectedImages.filter((s) => s.id !== id);
+	}
+
+	// Upload audio as soon as the parent hands it to us (after recording stops).
+	$effect(() => {
+		if (selectedAudio && selectedAudio.blob && !selectedAudio.key && !selectedAudio.uploading && !selectedAudio.error) {
+			selectedAudio = { ...selectedAudio, uploading: true, progress: 0 };
+			uploadFile('/api/upload', selectedAudio.blob, {
+				onProgress: (frac) => {
+					if (selectedAudio) selectedAudio = { ...selectedAudio, progress: frac };
+				}
+			})
+				.then((res) => {
+					if (selectedAudio) {
+						selectedAudio = { ...selectedAudio, key: res.key, mime: res.mime, progress: 1, uploading: false };
+					}
+				})
+				.catch((err) => {
+					if (selectedAudio) {
+						selectedAudio = { ...selectedAudio, error: err.message || 'Upload failed', uploading: false };
+					}
+					toast('Audio upload failed', { kind: 'error' });
+				});
+		}
+	});
+
+	// Aggregate upload progress across all in-flight images + audio. Returns
+	// a fraction 0..1 of how much of the in-flight work is done. If nothing is
+	// uploading, returns null.
+	let uploadProgress = $derived.by(() => {
+		const inFlight = [];
+		for (const img of selectedImages) {
+			if (img.error) continue;
+			if (!img.key) inFlight.push(img.progress || 0);
+		}
+		if (selectedAudio && !selectedAudio.error && !selectedAudio.key && selectedAudio.blob) {
+			inFlight.push(selectedAudio.progress || 0);
+		}
+		if (inFlight.length === 0) return null;
+		return inFlight.reduce((a, b) => a + b, 0) / inFlight.length;
+	});
+
 	function handleAnalyze() {
-		// Cancel any pending search and prevent future results
 		clearTimeout(searchTimeout);
 		searchActive = false;
 		searchResults = [];
 		showSearchResults = false;
 		onAnalyze();
-		// Re-enable search after a brief delay
 		setTimeout(() => { searchActive = true; }, 100);
 	}
 
-	// Watch userMessage changes
 	$effect(() => {
 		searchMeals(userMessage);
 	});
@@ -102,6 +180,10 @@
 		userMessage = '';
 		onMealSelect(meal);
 	}
+
+	// SVG progress ring math
+	const RING_RADIUS = 22;
+	const RING_CIRC = 2 * Math.PI * RING_RADIUS;
 </script>
 
 <div id="trackView">
@@ -110,7 +192,8 @@
 		bind:this={fileInput}
 		hidden
 		accept="image/*"
-		onchange={(e) => onFileSelect(e.target.files[0])}
+		multiple
+		onchange={(e) => handleFileSelect(e.target.files)}
 	/>
 	<div class="chat-bar">
 		<div class="input-wrapper">
@@ -122,7 +205,6 @@
 				disabled={isAiLoading}
 				onkeydown={handleKeyDown}
 				onblur={() => {
-					// Delay to allow click events on suggestions to fire first
 					setTimeout(() => {
 						showSearchResults = false;
 					}, 150);
@@ -168,27 +250,57 @@
 				<Mic size={20} />
 			{/if}
 		</button>
-		<button class="send-btn" onclick={handleAnalyze} disabled={isAiLoading}>
-			{#if isAiLoading}
-				<div class="btn-spinner"></div>
-			{:else}
-				<Send size={18} />
+		<div class="send-wrap">
+			{#if uploadProgress !== null}
+				<svg class="send-ring" viewBox="0 0 50 50" aria-hidden="true">
+					<circle class="ring-bg" cx="25" cy="25" r={RING_RADIUS} />
+					<circle
+						class="ring-fg"
+						cx="25"
+						cy="25"
+						r={RING_RADIUS}
+						stroke-dasharray={RING_CIRC}
+						stroke-dashoffset={RING_CIRC * (1 - uploadProgress)}
+					/>
+				</svg>
 			{/if}
-		</button>
+			<button class="send-btn" onclick={handleAnalyze} disabled={isAiLoading}>
+				{#if isAiLoading}
+					<div class="btn-spinner"></div>
+				{:else}
+					<Send size={18} />
+				{/if}
+			</button>
+		</div>
 	</div>
-	{#if selectedFile}
-		<div class="attachment-badge">
-			<Camera size={14} strokeWidth={2.5} />
-			<span>IMAGE ATTACHED</span>
-			<button class="clear-btn" onclick={() => (selectedFile = null)} title="Remove image"
-				>&times;</button
-			>
+	{#if selectedImages.length > 0}
+		<div class="attachment-row">
+			{#each selectedImages as img (img.id)}
+				<div class="thumb" class:errored={img.error}>
+					<img src={img.thumb} alt="" />
+					{#if !img.key && !img.error}
+						<div class="thumb-progress" style="--p: {Math.round((img.progress || 0) * 100)}%"></div>
+					{/if}
+					{#if img.error}
+						<div class="thumb-err" title={img.error}>!</div>
+					{/if}
+					<button class="thumb-clear" onclick={() => removeImage(img.id)} title="Remove">×</button>
+				</div>
+			{/each}
 		</div>
 	{/if}
 	{#if selectedAudio}
 		<div class="attachment-badge">
 			<Mic size={14} strokeWidth={2.5} />
-			<span>AUDIO ATTACHED</span>
+			<span>
+				{#if selectedAudio.error}
+					AUDIO FAILED
+				{:else if selectedAudio.key}
+					AUDIO READY
+				{:else}
+					UPLOADING {Math.round((selectedAudio.progress || 0) * 100)}%
+				{/if}
+			</span>
 			<button class="clear-btn" onclick={() => (selectedAudio = null)} title="Remove audio"
 				>&times;</button
 			>
@@ -322,6 +434,105 @@
 		to {
 			transform: rotate(360deg);
 		}
+	}
+
+	.send-wrap {
+		position: relative;
+		width: 48px;
+		height: 48px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		flex-shrink: 0;
+	}
+	.send-wrap :global(.send-btn) {
+		width: 100%;
+		height: 100%;
+	}
+	.send-ring {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		pointer-events: none;
+		transform: rotate(-90deg);
+	}
+	.ring-bg {
+		fill: none;
+		stroke: rgba(255, 255, 255, 0.15);
+		stroke-width: 2;
+	}
+	.ring-fg {
+		fill: none;
+		stroke: #4ade80;
+		stroke-width: 2.5;
+		stroke-linecap: round;
+		transition: stroke-dashoffset 0.15s linear;
+	}
+
+	.attachment-row {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+		margin-top: 8px;
+	}
+	.thumb {
+		position: relative;
+		width: 64px;
+		height: 64px;
+		border-radius: 8px;
+		overflow: hidden;
+		background: #111;
+		border: 1px solid #333;
+		flex-shrink: 0;
+	}
+	.thumb.errored {
+		border-color: #b04040;
+	}
+	.thumb img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		display: block;
+	}
+	.thumb-progress {
+		position: absolute;
+		left: 0;
+		bottom: 0;
+		height: 3px;
+		width: var(--p, 0%);
+		background: #4ade80;
+		transition: width 0.15s linear;
+	}
+	.thumb-err {
+		position: absolute;
+		inset: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: rgba(0, 0, 0, 0.6);
+		color: #ff8080;
+		font-weight: 700;
+	}
+	.thumb-clear {
+		position: absolute;
+		top: 2px;
+		right: 2px;
+		width: 20px;
+		height: 20px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		border: none;
+		background: rgba(0, 0, 0, 0.7);
+		color: #fff;
+		font-size: 1rem;
+		line-height: 1;
+		border-radius: 50%;
+		cursor: pointer;
+	}
+	.thumb-clear:hover {
+		background: rgba(0, 0, 0, 0.9);
 	}
 
 	.attachment-badge {

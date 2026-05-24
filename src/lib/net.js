@@ -126,3 +126,50 @@ export async function fetchWithRetry(url, init = {}) {
     }
     throw lastErr || new Error('Request failed');
 }
+
+/**
+ * Upload a single file (Blob/File) via XHR so we can report progress events.
+ *
+ * @param {string} url
+ * @param {Blob|File} file
+ * @param {{ field?: string, onProgress?: (frac: number) => void, signal?: AbortSignal }} [opts]
+ * @returns {Promise<any>} parsed JSON response
+ */
+export function uploadFile(url, file, opts = {}) {
+    const { field = 'file', onProgress, signal } = opts;
+    return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', url);
+
+        if (signal) {
+            if (signal.aborted) {
+                xhr.abort();
+                const e = new Error('Aborted'); e.name = 'AbortError';
+                return reject(e);
+            }
+            signal.addEventListener('abort', () => xhr.abort(), { once: true });
+        }
+
+        xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total);
+        };
+
+        xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+                try { resolve(JSON.parse(xhr.responseText)); }
+                catch { resolve(xhr.responseText); }
+            } else {
+                reject(new Error(`Upload failed: HTTP ${xhr.status}`));
+            }
+        };
+        xhr.onerror = () => reject(new Error('Network error during upload'));
+        xhr.onabort = () => {
+            const e = new Error('Aborted'); e.name = 'AbortError';
+            reject(e);
+        };
+
+        const form = new FormData();
+        form.append(field, file);
+        xhr.send(form);
+    });
+}

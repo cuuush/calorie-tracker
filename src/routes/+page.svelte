@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { marked } from 'marked';
 	import { fade } from 'svelte/transition';
-	import { Settings, Clock, Send, Pencil, Square, CheckSquare } from 'lucide-svelte';
+	import { Settings, Clock, Send, Square, CheckSquare, MessageSquare, ChevronLeft, ChevronRight } from 'lucide-svelte';
 	import TrackView from '$lib/components/TrackView.svelte';
 	import HistoryView from '$lib/components/HistoryView.svelte';
 	import ChatView from '$lib/components/ChatView.svelte';
@@ -35,9 +35,8 @@
 
 	// Track State
 	let userMessage = $state('');
-	let fileInput = $state(null);
-	let selectedFile = $state(null);
-	let selectedAudio = $state(null);
+	let selectedImages = $state([]); // [{ id, file, key?, mime?, progress, error?, thumb }]
+	let selectedAudio = $state(null); // { blob, key?, mime?, progress, error?, uploading? } | null
 	let isRecording = $state(false);
 	let mediaRecorder;
 	let mediaStream;
@@ -50,10 +49,13 @@
 
 	// Result State
 	let currentAnalysis = $state(null);
+	let currentEntryId = $state(null); // server-side row created at analyze-time
 	let selectedItems = $state([]);
 	let customHour = $state(null); // integer 0-23 when selectedMealPeriod === 'custom'
 	let showTimeSelector = $state(false);
+	let showFollowupPanel = $state(false);
 	let selectedMealPeriod = $state('current'); // 'breakfast', 'lunch', 'dinner', 'custom', 'current'
+	let selectedDate = $state(new Date()); // day for new meal — shift with arrows
 	let resultTotalCal = $derived(
 		selectedItems.reduce((sum, idx) => sum + (currentAnalysis?.items[idx]?.calories || 0), 0)
 	);
@@ -233,7 +235,7 @@
 				mediaRecorder.ondataavailable = (e) => audioChunks.push(e.data);
 				mediaRecorder.onstop = async () => {
 					const blob = new Blob(audioChunks, { type: 'audio/wav' });
-					selectedAudio = blob;
+					selectedAudio = { blob };
 					stopMicStream();
 				};
 				mediaRecorder.start();
@@ -277,7 +279,7 @@
 				const originalOnStop = mediaRecorder.onstop;
 				mediaRecorder.onstop = async () => {
 					const blob = new Blob(audioChunks, { type: 'audio/wav' });
-					selectedAudio = blob;
+					selectedAudio = { blob };
 					if (originalOnStop) await originalOnStop();
 					resolve();
 				};
@@ -299,13 +301,14 @@
 			audioFrameCount = 0;
 		}
 
-		if (!selectedFile && !userMessage && !selectedAudio) {
+		if (selectedImages.length === 0 && !userMessage && !selectedAudio) {
 			toast('Add a photo, text, or voice first.');
 			return;
 		}
 
 		// Navigate to result view IMMEDIATELY with skeleton placeholders.
 		currentAnalysis = null;
+		currentEntryId = null;
 		pendingClarification = null;
 		analysisRejection = null;
 		showOtherInput = false;
@@ -313,19 +316,33 @@
 		analyzePhase = 'loading';
 		currentView = 'result';
 
-		const formData = new FormData();
-		if (selectedFile) formData.append('image', selectedFile);
-		if (selectedAudio) formData.append('audio', selectedAudio);
-		formData.append('message', userMessage);
+		// Wait for any in-flight image/audio uploads to finish (or fail).
+		try {
+			await waitForUploads();
+		} catch (e) {
+			analysisRejection = { message: e.message || 'Upload failed' };
+			analyzePhase = 'rejected';
+			return;
+		}
+
+		const imageKeys = selectedImages.map((s) => s.key).filter(Boolean);
+		const audioKey = selectedAudio?.key || null;
 
 		analyzeAbort = new AbortController();
 		try {
 			const res = await fetchWithRetry('/api/analyze', {
 				method: 'POST',
-				body: formData,
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					message: userMessage,
+					imageKeys,
+					audioKey,
+					timestamp: getMealTime()
+				}),
 				signal: analyzeAbort.signal
 			});
 			const data = await res.json();
+			if (data.entryId) currentEntryId = data.entryId;
 			handleAnalyzeResponse(data);
 		} catch (err) {
 			if (err.name === 'AbortError') return;
@@ -334,6 +351,26 @@
 		} finally {
 			analyzeAbort = null;
 		}
+	}
+
+	// Resolve once every upload-tracked attachment either has a key or has errored.
+	function waitForUploads() {
+		return new Promise((resolve, reject) => {
+			const start = Date.now();
+			const check = () => {
+				const pendingImg = selectedImages.find((s) => !s.key && !s.error);
+				const pendingAud = selectedAudio && selectedAudio.blob && !selectedAudio.key && !selectedAudio.error;
+				if (!pendingImg && !pendingAud) {
+					const erroredImg = selectedImages.find((s) => s.error);
+					if (erroredImg) return reject(new Error('An image upload failed — remove it and retry'));
+					if (selectedAudio?.error) return reject(new Error('Audio upload failed — remove it and retry'));
+					return resolve();
+				}
+				if (Date.now() - start > 60000) return reject(new Error('Upload timed out'));
+				setTimeout(check, 100);
+			};
+			check();
+		});
 	}
 
 	function handleAnalyzeResponse(data) {
@@ -348,7 +385,8 @@
 			currentAnalysis = data;
 			selectedItems = data.items.map((_, i) => i);
 			userMessage = '';
-			selectedFile = null;
+			selectedImages.forEach((s) => s.thumb && URL.revokeObjectURL(s.thumb));
+			selectedImages = [];
 			selectedAudio = null;
 			analyzePhase = 'ready';
 		}
@@ -367,10 +405,11 @@
 			const res = await fetchWithRetry('/api/analyze', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ messages, tool_call_id, choice }),
+				body: JSON.stringify({ entryId: currentEntryId, messages, tool_call_id, choice }),
 				signal: analyzeAbort.signal
 			});
 			const data = await res.json();
+			if (data.entryId) currentEntryId = data.entryId;
 			handleAnalyzeResponse(data);
 		} catch (err) {
 			if (err.name === 'AbortError') return;
@@ -391,24 +430,22 @@
 	}
 
 	function getMealTime() {
-		let date;
+		const date = new Date(selectedDate);
 		if (selectedMealPeriod === 'custom' && customHour !== null) {
-			date = new Date();
 			date.setHours(customHour, 0, 0, 0);
 		} else if (selectedMealPeriod === 'current') {
-			date = new Date();
+			// 'current' on a non-today date defaults to noon; on today, use actual time.
+			const now = new Date();
+			if (sameDay(date, now)) {
+				date.setHours(now.getHours(), now.getMinutes(), now.getSeconds(), 0);
+			} else {
+				date.setHours(12, 0, 0, 0);
+			}
 		} else {
-			// Set time based on meal period (breakfast, lunch, dinner)
-			date = new Date();
-			const mealTimes = {
-				breakfast: 8,
-				lunch: 13,
-				dinner: 19
-			};
+			const mealTimes = { breakfast: 8, lunch: 13, dinner: 19 };
 			date.setHours(mealTimes[selectedMealPeriod] || date.getHours(), 0, 0, 0);
 		}
 
-		// Format as local time string (no timezone conversion)
 		const year = date.getFullYear();
 		const month = String(date.getMonth() + 1).padStart(2, '0');
 		const day = String(date.getDate()).padStart(2, '0');
@@ -419,49 +456,94 @@
 		return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
 	}
 
+	function sameDay(a, b) {
+		return a.getFullYear() === b.getFullYear()
+			&& a.getMonth() === b.getMonth()
+			&& a.getDate() === b.getDate();
+	}
+
+	function shiftSelectedDate(days) {
+		const d = new Date(selectedDate);
+		d.setDate(d.getDate() + days);
+		selectedDate = d;
+	}
+
+	function fmtSelectedDateLabel(d) {
+		const today = new Date();
+		const yest = new Date(); yest.setDate(today.getDate() - 1);
+		const tom = new Date(); tom.setDate(today.getDate() + 1);
+		if (sameDay(d, today)) return 'Today';
+		if (sameDay(d, yest)) return 'Yesterday';
+		if (sameDay(d, tom)) return 'Tomorrow';
+		return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+	}
+
 	function cancelAnalysis() {
 		if (analyzeAbort) analyzeAbort.abort();
+
+		// Tear down the placeholder row server-side so it doesn't litter history.
+		if (currentEntryId) {
+			fetchWithRetry(`/api/entry/${currentEntryId}`, { method: 'DELETE' }).catch(() => {});
+		}
+
 		currentAnalysis = null;
+		currentEntryId = null;
 		selectedItems = [];
 		selectedMealPeriod = 'current';
 		customHour = null;
 		showTimeSelector = false;
+		showFollowupPanel = false;
+		selectedDate = new Date();
 		pendingClarification = null;
 		analysisRejection = null;
 		showOtherInput = false;
 		otherInput = '';
 		analyzePhase = 'idle';
 		currentView = 'track';
-		// selectedFile / selectedAudio / userMessage preserved — user can retry.
+		// selectedImages / selectedAudio / userMessage preserved — user can retry.
 	}
 
 	async function commitAnalysis() {
 		isLoading = true;
 		const finalItems = selectedItems.map((idx) => currentAnalysis.items[idx]);
 		const timestamp = getMealTime();
-		const entry = {
-			...currentAnalysis,
-			items: finalItems,
-			timestamp,
-			total_calories: finalItems.reduce((s, i) => s + i.calories, 0),
-			total_protein: Math.round(finalItems.reduce((s, i) => s + i.protein, 0)),
-			total_carbs: finalItems.reduce((s, i) => s + i.carbs, 0)
-		};
 
 		try {
-			await fetchWithRetry('/api/entry', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify(entry)
-			});
-			// Reset meal time selection
+			if (currentEntryId) {
+				// Common path: entry already exists from /api/analyze. Flip to committed
+				// with the user's final item selection + chosen timestamp.
+				await fetchWithRetry(`/api/entry/${currentEntryId}`, {
+					method: 'PATCH',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						timestamp,
+						items: finalItems,
+						status: 'committed'
+					})
+				});
+			} else {
+				// Fallback: handleMealSelect (re-log a past meal) skips analyze and has no entryId.
+				const entry = {
+					...currentAnalysis,
+					items: finalItems,
+					timestamp,
+					total_calories: finalItems.reduce((s, i) => s + i.calories, 0),
+					total_protein: Math.round(finalItems.reduce((s, i) => s + i.protein, 0)),
+					total_carbs: finalItems.reduce((s, i) => s + i.carbs, 0)
+				};
+				await fetchWithRetry('/api/entry', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify(entry)
+				});
+			}
 			selectedMealPeriod = 'current';
 			customHour = null;
+			selectedDate = new Date();
+			currentEntryId = null;
 			analyzePhase = 'idle';
-			// Reload data
 			await loadStats();
-			history = []; // Reset history so it reloads when switching to history tab
-			// Switch back to track view
+			history = [];
 			currentView = 'track';
 			currentTab = 'track';
 		} catch (e) {
@@ -492,6 +574,7 @@
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
+					entryId: currentEntryId,
 					messages: currentAnalysis.messages,
 					message,
 					currentItems: currentAnalysis.items,
@@ -605,7 +688,7 @@
 				{#if currentView === 'track'}
 					<TrackView
 						bind:userMessage
-						bind:selectedFile
+						bind:selectedImages
 						bind:selectedAudio
 						bind:isRecording
 						{isAiLoading}
@@ -617,7 +700,6 @@
 						{proteinFocused}
 						onAnalyze={analyze}
 						onToggleMic={toggleMic}
-						onFileSelect={(file) => selectedFile = file}
 						onMealSelect={handleMealSelect}
 					/>
 				{/if}
@@ -733,15 +815,10 @@
 						<h3 style="font-size: 1.4rem; margin-bottom: 8px; line-height: 1.3;">
 							{currentAnalysis.meal_title || currentAnalysis.user_message || 'Meal Analysis'}
 						</h3>
-						<button
-							class="time-edit-btn"
-							class:active={showTimeSelector}
-							onclick={() => (showTimeSelector = !showTimeSelector)}
-						>
-							<Clock size={14} />
-							<span class="time-edit-text">{displayMealTime}</span>
-							<Pencil size={12} />
-						</button>
+						<div class="time-summary">
+							<Clock size={12} />
+							<span>{fmtSelectedDateLabel(selectedDate)} · {displayMealTime}</span>
+						</div>
 					</div>
 					<div class="entry-macros">
 						{#if !proteinFocused}
@@ -763,67 +840,71 @@
 					</div>
 				</div>
 
+				<div class="action-row">
+					<button
+						class="mini-btn"
+						class:active={showFollowupPanel}
+						onclick={() => {
+							showFollowupPanel = !showFollowupPanel;
+							if (showFollowupPanel) showTimeSelector = false;
+						}}
+					>
+						<MessageSquare size={13} />
+						EDIT
+					</button>
+					<button
+						class="mini-btn"
+						class:active={showTimeSelector}
+						onclick={() => {
+							showTimeSelector = !showTimeSelector;
+							if (showTimeSelector) showFollowupPanel = false;
+						}}
+					>
+						<Clock size={13} />
+						CHANGE TIME
+					</button>
+				</div>
+
 				{#if showTimeSelector}
-					<div class="time-options" style="margin-top: 16px;">
+					<div class="time-options" style="margin-top: 12px;">
+						<div class="date-nav">
+							<button class="date-arrow" onclick={() => shiftSelectedDate(-1)} aria-label="Previous day">
+								<ChevronLeft size={18} />
+							</button>
+							<span class="date-label">{fmtSelectedDateLabel(selectedDate)}</span>
+							<button class="date-arrow" onclick={() => shiftSelectedDate(1)} aria-label="Next day">
+								<ChevronRight size={18} />
+							</button>
+						</div>
 						<div class="quick-times">
 							<button
 								class="quick-time {selectedMealPeriod === 'current' ? 'active' : ''}"
-								onclick={() => {
-									selectedMealPeriod = 'current';
-									customHour = null;
-									showTimeSelector = false;
-								}}
-							>
-								Now
-							</button>
+								onclick={() => { selectedMealPeriod = 'current'; customHour = null; }}
+							>Now</button>
 							<button
 								class="quick-time {selectedMealPeriod === 'breakfast' ? 'active' : ''}"
-								onclick={() => {
-									selectedMealPeriod = 'breakfast';
-									customHour = null;
-									showTimeSelector = false;
-								}}
-							>
-								8 AM
-							</button>
+								onclick={() => { selectedMealPeriod = 'breakfast'; customHour = null; }}
+							>8 AM</button>
 							<button
 								class="quick-time {selectedMealPeriod === 'lunch' ? 'active' : ''}"
-								onclick={() => {
-									selectedMealPeriod = 'lunch';
-									customHour = null;
-									showTimeSelector = false;
-								}}
-							>
-								1 PM
-							</button>
+								onclick={() => { selectedMealPeriod = 'lunch'; customHour = null; }}
+							>1 PM</button>
 							<button
 								class="quick-time {selectedMealPeriod === 'dinner' ? 'active' : ''}"
-								onclick={() => {
-									selectedMealPeriod = 'dinner';
-									customHour = null;
-									showTimeSelector = false;
-								}}
-							>
-								7 PM
-							</button>
+								onclick={() => { selectedMealPeriod = 'dinner'; customHour = null; }}
+							>7 PM</button>
 						</div>
 						<div class="hour-grid-label">Or pick an hour</div>
 						<div class="hour-grid">
 							{#each Array(24) as _, h}
-								{@const isFuture = h > new Date().getHours()}
+								{@const now = new Date()}
+								{@const isFuture = sameDay(selectedDate, now) && h > now.getHours()}
 								<button
 									class="hour-pill"
 									class:active={selectedMealPeriod === 'custom' && customHour === h}
 									class:dim={isFuture}
-									disabled={isFuture}
-									onclick={() => {
-										selectedMealPeriod = 'custom';
-										customHour = h;
-										showTimeSelector = false;
-									}}
-								>
-									{fmtHour12(h)}
-								</button>
+									onclick={() => { selectedMealPeriod = 'custom'; customHour = h; }}
+								>{fmtHour12(h)}</button>
 							{/each}
 						</div>
 					</div>
@@ -875,59 +956,55 @@
 					</details>
 				{/if}
 
-				<div
-					class="detail-view"
-					style="display: block; margin-top: 30px; padding: 20px; background: #111; border-radius: 8px;"
-				>
-					{#if followupMessages.length > 0}
-						<div class="followup-thread">
-							{#each followupMessages as msg}
-								<div class="followup-msg {msg.role}">
-									<div class="followup-bubble">{msg.content}</div>
-								</div>
-							{/each}
-							{#if isAiLoading}
-								<div class="followup-msg assistant">
-									<div class="followup-bubble typing">
-										<span></span><span></span><span></span>
+				{#if showFollowupPanel}
+					<div class="chat-panel" style="margin-top: 12px;">
+						{#if followupMessages.length > 0}
+							<div class="followup-thread">
+								{#each followupMessages as msg}
+									<div class="followup-msg {msg.role}">
+										<div class="followup-bubble">{msg.content}</div>
 									</div>
-								</div>
-							{/if}
+								{/each}
+								{#if isAiLoading}
+									<div class="followup-msg assistant">
+										<div class="followup-bubble typing">
+											<span></span><span></span><span></span>
+										</div>
+									</div>
+								{/if}
+							</div>
+						{/if}
+						<div class="chat-bar" style="margin-top: 0; margin-bottom: 0;">
+							<input
+								type="text"
+								class="chat-input"
+								placeholder="WANT TO CHANGE SOMETHING?..."
+								disabled={isAiLoading}
+								onkeypress={(e) => {
+									if (e.key === 'Enter') {
+										handleFollowup(e.target.value);
+										e.target.value = '';
+									}
+								}}
+							/>
+							<button
+								class="send-btn"
+								onclick={(e) => {
+									const input = e.currentTarget.previousElementSibling;
+									handleFollowup(input.value);
+									input.value = '';
+								}}
+								disabled={isAiLoading}
+							>
+								{#if isAiLoading}
+									<div class="btn-spinner"></div>
+								{:else}
+									<Send size={18} />
+								{/if}
+							</button>
 						</div>
-					{/if}
-					<div class="chat-bar" style="margin-top: 0; margin-bottom: 0;">
-						<input
-							type="text"
-							class="chat-input"
-							placeholder="WANT TO CHANGE SOMETHING?..."
-							disabled={isAiLoading}
-							onkeypress={(e) => {
-								if (e.key === 'Enter') {
-									handleFollowup(e.target.value);
-									e.target.value = '';
-								}
-							}}
-						/>
-						<button
-							class="send-btn"
-							onclick={(e) => {
-								const input = e.currentTarget.previousElementSibling;
-								handleFollowup(input.value);
-								input.value = '';
-							}}
-							disabled={isAiLoading}
-						>
-							{#if isAiLoading}
-								<div class="btn-spinner"></div>
-							{:else}
-								<Send size={18} />
-							{/if}
-						</button>
 					</div>
-
-				</div>
-
-
+				{/if}
 
 				<div class="result-actions">
 					<button onclick={cancelAnalysis} class="cancel-entry-btn">Cancel</button>
@@ -1342,8 +1419,97 @@
 	}
 
 	.hour-pill.dim {
-		opacity: 0.3;
-		cursor: not-allowed;
+		opacity: 0.4;
+	}
+
+	.time-summary {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		font-size: 0.75rem;
+		color: #888;
+		letter-spacing: 0.02em;
+	}
+
+	.action-row {
+		display: flex;
+		gap: 0.5rem;
+		margin-top: 1rem;
+		flex-wrap: wrap;
+	}
+
+	.mini-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35rem;
+		background: transparent;
+		border: 1px solid #2a2a2a;
+		color: #aaa;
+		padding: 0.4rem 0.7rem;
+		border-radius: 4px;
+		font-size: 0.65rem;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+		cursor: pointer;
+		transition: all 0.15s;
+		font-family: inherit;
+	}
+
+	.mini-btn:hover {
+		background: #111;
+		color: #fff;
+		border-color: #3a3a3a;
+	}
+
+	.mini-btn.active {
+		background: #111;
+		color: #4ade80;
+		border-color: #4ade80;
+	}
+
+	.date-nav {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+		padding: 0.25rem 0;
+	}
+
+	.date-arrow {
+		background: #111;
+		border: 1px solid #222;
+		color: #ddd;
+		width: 32px;
+		height: 32px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		border-radius: 6px;
+		cursor: pointer;
+		transition: all 0.15s;
+	}
+
+	.date-arrow:hover {
+		background: #1a1a1a;
+		border-color: #4ade80;
+		color: #4ade80;
+	}
+
+	.date-label {
+		font-size: 0.85rem;
+		font-weight: 600;
+		color: #eee;
+		letter-spacing: 0.02em;
+	}
+
+	.chat-panel {
+		padding: 0.75rem;
+		background: #0a0a0a;
+		border: 1px solid #1c1c1c;
+		border-radius: 8px;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
 	}
 
 	/* Tab Bar */

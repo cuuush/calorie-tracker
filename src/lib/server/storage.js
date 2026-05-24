@@ -27,13 +27,18 @@ export class Storage {
             return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
         })();
 
+        const status = entry.status || 'committed';
+
         // 1. Save large content to R2
         const largeContent = {
             items: entry.items || [],
             reasoning: entry.reasoning || null,
             reasoning_details: entry.reasoning_details || null,
             conversation_messages: entry.messages || [],
-            raw_response: entry.raw_response || null
+            raw_response: entry.raw_response || null,
+            image_keys: entry.image_keys || [],
+            audio_key: entry.audio_key || null,
+            pending_question: entry.pending_question || null
         };
 
         await this.images.put(`entry/${entryId}.json`, JSON.stringify(largeContent), {
@@ -44,15 +49,16 @@ export class Storage {
         // items are also saved in D1 for quick access/indexing if needed, but strict details are in R2
         await this.db.prepare(`
       INSERT INTO nutrition_entries (
-        id, user_id, timestamp, user_message, meal_title, total_calories, total_protein, total_carbs, items
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        id, user_id, timestamp, user_message, meal_title, total_calories, total_protein, total_carbs, items, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         timestamp = excluded.timestamp,
         meal_title = excluded.meal_title,
         total_calories = excluded.total_calories,
         total_protein = excluded.total_protein,
         total_carbs = excluded.total_carbs,
-        items = excluded.items
+        items = excluded.items,
+        status = excluded.status
     `).bind(
             entryId,
             userId,
@@ -62,10 +68,19 @@ export class Storage {
             entry.total_calories || 0,
             entry.total_protein || 0,
             entry.total_carbs || 0,
-            JSON.stringify(entry.items || [])
+            JSON.stringify(entry.items || []),
+            status
         ).run();
 
-        return { ...entry, id: entryId, timestamp };
+        return { ...entry, id: entryId, timestamp, status };
+    }
+
+    async setEntryStatus(id, userId, status) {
+        if (!userId) throw new Error('userId is required');
+        await this.db
+            .prepare('UPDATE nutrition_entries SET status = ? WHERE id = ? AND user_id = ?')
+            .bind(status, id, userId)
+            .run();
     }
 
     async getHistory(userId, limit = 100) {
@@ -82,10 +97,30 @@ export class Storage {
       LIMIT ?
     `).bind(userId, limit).all();
 
-        return results.map(row => ({
+        const rows = results.map(row => ({
             ...row,
+            status: row.status || 'committed',
             items: row.items ? JSON.parse(row.items) : []
         }));
+
+        // Hydrate pending_question for non-committed entries so HistoryView can surface it.
+        const pending = rows.filter((r) => r.status !== 'committed');
+        if (pending.length > 0 && this.images) {
+            await Promise.all(
+                pending.map(async (row) => {
+                    try {
+                        const object = await this.images.get(`entry/${row.id}.json`);
+                        if (!object) return;
+                        const blob = await object.json();
+                        if (blob.pending_question) row.pending_question = blob.pending_question;
+                    } catch {
+                        // Best-effort; missing blob just leaves badge without question text.
+                    }
+                })
+            );
+        }
+
+        return rows;
     }
 
     async getEntriesBetween(userId, startISO, endISO) {
@@ -123,6 +158,7 @@ export class Storage {
         return {
             ...meta,
             ...content,
+            status: meta.status || 'committed',
             items: content.items || (meta.items ? JSON.parse(meta.items) : [])
         };
     }
@@ -132,12 +168,30 @@ export class Storage {
             throw new Error('userId is required');
         }
 
+        // Look up pending image/audio keys before we drop the blob so we can clean R2.
+        let keysToDelete = [];
+        try {
+            const object = await this.images.get(`entry/${id}.json`);
+            if (object) {
+                const blob = await object.json();
+                if (Array.isArray(blob.image_keys)) keysToDelete.push(...blob.image_keys);
+                if (blob.audio_key) keysToDelete.push(blob.audio_key);
+            }
+        } catch {
+            // Best-effort cleanup; proceed with DB delete regardless.
+        }
+
         await this.db.prepare('DELETE FROM nutrition_entries WHERE id = ? AND user_id = ?').bind(id, userId).run();
         await this.images.delete(`entry/${id}.json`);
+
+        for (const k of keysToDelete) {
+            try { await this.images.delete(k); } catch { /* ignore */ }
+        }
+
         return true;
     }
 
-    async updateConversation(id, messages, reasoning, reasoning_details) {
+    async updateConversation(id, messages, reasoning, reasoning_details, extra = {}) {
         const object = await this.images.get(`entry/${id}.json`);
         if (!object) throw new Error('Entry not found in storage');
 
@@ -146,6 +200,10 @@ export class Storage {
         content.conversation_messages = messages;
         if (reasoning) content.reasoning = reasoning;
         if (reasoning_details) content.reasoning_details = reasoning_details;
+        // Allow callers to clear or set pending_question / image_keys via extra.
+        if ('pending_question' in extra) content.pending_question = extra.pending_question;
+        if ('image_keys' in extra) content.image_keys = extra.image_keys;
+        if ('audio_key' in extra) content.audio_key = extra.audio_key;
 
         await this.images.put(`entry/${id}.json`, JSON.stringify(content), {
             httpMetadata: { contentType: 'application/json' }

@@ -101,6 +101,13 @@ How to respond:
             if (entry) {
                 const newEntry = { ...entry, items, total_calories, total_protein, total_carbs };
                 if (args.meal_title) newEntry.meal_title = args.meal_title;
+                // Clearing pending_question: the user is editing freely, so any stale
+                // clarification is moot. Status promotes awaiting_user → ready, but never
+                // downgrades a committed entry.
+                newEntry.pending_question = null;
+                if (newEntry.status === 'awaiting_user' || newEntry.status === 'analyzing') {
+                    newEntry.status = 'ready';
+                }
                 await locals.storage.saveEntry(newEntry, locals.user.id);
                 updatedEntry = newEntry;
             } else {
@@ -117,7 +124,9 @@ How to respond:
     }
 
     if (entryId) {
-        await locals.storage.updateConversation(entryId, conversation, null, null);
+        await locals.storage.updateConversation(entryId, conversation, null, null, {
+            pending_question: null
+        });
     }
 
     return json({

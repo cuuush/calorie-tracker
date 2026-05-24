@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(openclaw gateway*)",
+      "mcp__openclaw__web_fetch",
+      "Bash(# Check*)",
+      "Bash(gh issue*)",
+      "Bash(openclaw config*)",
+      "Bash(git*)",
+      "Bash(openclaw agent*)",
+      "Bash(mkdir*)",
+      "Bash(openclaw capability*)",
+      "Bash(openclaw devices*)",
+      "Bash(openclaw doctor*)",
+      "Bash(openclaw models*)",
+      "Bash(openclaw*)",
+      "Bash(sqlite3*)",
+      "Bash(openclaw memory*)",
+      "Bash(launchctl bootout*)",
+      "Bash(xcrun simctl*)"
+    ]
+  }
+}

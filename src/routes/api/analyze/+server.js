@@ -10,6 +10,7 @@ Identify items:
 - Use plate size, utensils, hands, and surrounding objects for portion scale. Restaurant plates ≈ 10–12", home plates ≈ 9".
 - If part of the dish is obscured or off-frame, infer from what's visible and what the dish typically contains.
 - If the user added text or audio alongside the photo, treat it as authoritative — it overrides what the image alone would suggest (brands, modifications, hidden ingredients, "no cheese", portion sizes, etc.). The photo shows what's on the plate; the narration explains what you can't see.
+- If multiple images are provided, treat them as views of the SAME meal (different plates, angles, or close-ups) and merge into one consolidated log.
 
 Macros:
 - Estimate calories, protein (g), and carbs (g) per item using typical nutrient values. ±15% is fine — don't agonize over precision.
@@ -120,9 +121,54 @@ const tools = [
     }
 ];
 
+function genEntryId() {
+    return `${Date.now()}-${Math.random().toString(36).substring(7)}`;
+}
+
+function localTimestamp() {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+}
+
+async function fetchAsDataUrl(env, key) {
+    const obj = await env.IMAGES.get(key);
+    if (!obj) return null;
+    const buf = await obj.arrayBuffer();
+    const mime = obj.httpMetadata?.contentType || 'application/octet-stream';
+    return { dataUrl: `data:${mime};base64,${Base64.fromUint8Array(new Uint8Array(buf))}`, mime };
+}
+
+async function buildContentFromKeys(env, message, imageKeys, audioKey) {
+    const content = [];
+    content.push({ type: 'text', text: message || (imageKeys?.length ? 'Analyze this food.' : '') });
+
+    if (Array.isArray(imageKeys)) {
+        for (const k of imageKeys) {
+            const fetched = await fetchAsDataUrl(env, k);
+            if (fetched) {
+                content.push({ type: 'image_url', image_url: { url: fetched.dataUrl } });
+            }
+        }
+    }
+
+    if (audioKey) {
+        const obj = await env.IMAGES.get(audioKey);
+        if (obj) {
+            const buf = await obj.arrayBuffer();
+            const mime = obj.httpMetadata?.contentType || 'audio/wav';
+            const fmt = mime.includes('mp3') ? 'mp3' : 'wav';
+            content.push({
+                type: 'input_audio',
+                input_audio: { data: Base64.fromUint8Array(new Uint8Array(buf)), format: fmt }
+            });
+        }
+    }
+
+    return content;
+}
+
 function stripBinariesFromConversation(conversation, userMessageText) {
-    // For storage in `/api/followup` later: drop image/audio base64 from the user
-    // message to keep follow-up payloads small. Replace with a text summary.
     return conversation.map((m) => {
         if (m.role === 'user' && Array.isArray(m.content)) {
             return { role: 'user', content: [{ type: 'text', text: userMessageText || 'Analyze this image' }] };
@@ -131,64 +177,15 @@ function stripBinariesFromConversation(conversation, userMessageText) {
     });
 }
 
-function dispatchToolCall(toolCall, conversation, userMessageText) {
-    if (!toolCall) {
-        return { status: 502, body: { error: 'AI did not return a valid response.' } };
-    }
+function totalsFromItems(items) {
+    const total_calories = items.reduce((sum, item) => sum + (item.calories || 0), 0);
+    const total_protein = Math.round(items.reduce((sum, item) => sum + (item.protein || 0), 0));
+    const total_carbs = items.reduce((sum, item) => sum + (item.carbs || 0), 0);
+    return { total_calories, total_protein, total_carbs };
+}
 
-    if (toolCall.function.name === 'reject_input') {
-        let reason;
-        try { reason = JSON.parse(toolCall.function.arguments).reason; } catch { reason = null; }
-        return {
-            status: 200,
-            body: {
-                rejection: { message: reason || "That doesn't look like food." }
-            }
-        };
-    }
-
-    if (toolCall.function.name === 'ask_clarification') {
-        let args;
-        try { args = JSON.parse(toolCall.function.arguments); } catch { args = {}; }
-        // Keep full conversation (including image) so the next LLM call still has
-        // visual context after the user picks.
-        return {
-            status: 200,
-            body: {
-                clarification: {
-                    question: args.question || 'Could you clarify?',
-                    options: Array.isArray(args.options) ? args.options : [],
-                    tool_call_id: toolCall.id
-                },
-                messages: conversation
-            }
-        };
-    }
-
-    if (toolCall.function.name === 'log_meal') {
-        let args;
-        try { args = JSON.parse(toolCall.function.arguments); } catch { args = {}; }
-        const items = args.items || [];
-        const total_calories = items.reduce((sum, item) => sum + (item.calories || 0), 0);
-        const total_protein = Math.round(items.reduce((sum, item) => sum + (item.protein || 0), 0));
-        const total_carbs = items.reduce((sum, item) => sum + (item.carbs || 0), 0);
-
-        return {
-            status: 200,
-            body: {
-                ...args,
-                items,
-                total_calories,
-                total_protein,
-                total_carbs,
-                // Strip binaries — this conversation will be saved with the entry and
-                // round-tripped through /api/followup, where image bytes aren't needed.
-                messages: stripBinariesFromConversation(conversation, userMessageText)
-            }
-        };
-    }
-
-    return { status: 502, body: { error: `Unexpected tool call: ${toolCall.function.name}` } };
+function pickModel(hasImage) {
+    return hasImage ? 'google/gemini-3.1-pro-preview' : 'google/gemini-3-flash-preview';
 }
 
 /** @type {import('./$types').RequestHandler} */
@@ -197,92 +194,205 @@ export async function POST({ request, locals, platform }) {
         return json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const contentType = request.headers.get('content-type') || '';
+    const body = await request.json();
+    const userId = locals.user.id;
+    const storage = locals.storage;
+    const env = platform.env;
+    const waitUntil = (p) => platform?.context?.waitUntil?.(p);
+
+    const isContinuation = typeof body.tool_call_id === 'string' && typeof body.choice === 'string';
+
+    let entryId;
     let messages;
     let model;
-    let reasoning = null;
     let userMessage = '';
+    let imageKeys = [];
+    let audioKey = null;
+    let timestamp;
 
-    if (contentType.includes('application/json')) {
-        // Continuation: user answered a clarification question
-        const body = await request.json();
-        const { messages: priorMessages, tool_call_id, choice } = body;
-        if (!Array.isArray(priorMessages) || !tool_call_id || typeof choice !== 'string') {
-            return json({ error: 'Bad request' }, { status: 400 });
-        }
-        messages = [
-            ...priorMessages,
-            { role: 'tool', tool_call_id, content: choice }
-        ];
-        // Recover the original user text (for the eventual stripped message store).
-        const firstUser = priorMessages.find((m) => m.role === 'user');
-        if (firstUser) {
-            if (typeof firstUser.content === 'string') userMessage = firstUser.content;
-            else if (Array.isArray(firstUser.content)) {
-                const textPart = firstUser.content.find((p) => p.type === 'text');
-                if (textPart) userMessage = textPart.text || '';
+    if (isContinuation) {
+        // User answered a clarification — could be live (messages passed) or from history (entryId only).
+        entryId = body.entryId;
+        if (!entryId) return json({ error: 'entryId required for continuation' }, { status: 400 });
+
+        const entry = await storage.getEntryDetails(entryId, userId);
+        if (!entry) return json({ error: 'Entry not found' }, { status: 404 });
+
+        userMessage = entry.user_message || '';
+        imageKeys = entry.image_keys || [];
+        audioKey = entry.audio_key || null;
+        timestamp = entry.timestamp;
+
+        if (Array.isArray(body.messages) && body.messages.length > 0) {
+            messages = body.messages;
+        } else {
+            // Rebuild conversation from storage, re-inlining images from R2 if needed.
+            const stored = entry.conversation_messages || [];
+            if (stored.length === 0) {
+                return json({ error: 'Stored conversation missing' }, { status: 500 });
+            }
+            const hasImageInline = stored.some((m) =>
+                Array.isArray(m.content) && m.content.some((p) => p.type === 'image_url')
+            );
+            if (hasImageInline || (imageKeys.length === 0 && !audioKey)) {
+                messages = stored;
+            } else {
+                // Rebuild the first user message with fresh image bytes.
+                const sys = imagePrompt;
+                const userContent = await buildContentFromKeys(env, userMessage, imageKeys, audioKey);
+                const rest = stored.slice(stored[0]?.role === 'system' ? 2 : 1);
+                messages = [
+                    { role: 'system', content: sys },
+                    { role: 'user', content: userContent },
+                    ...rest
+                ];
             }
         }
-        // Pick model based on whether the conversation still carries an image.
-        const hasImage = priorMessages.some((m) =>
+
+        messages = [...messages, { role: 'tool', tool_call_id: body.tool_call_id, content: body.choice }];
+
+        const hasImage = messages.some((m) =>
             Array.isArray(m.content) && m.content.some((p) => p.type === 'image_url')
         );
-        model = hasImage ? 'google/gemini-3.1-pro-preview' : 'google/gemini-3-flash-preview';
+        model = pickModel(hasImage);
     } else {
-        // Initial: multipart form data with image/text/audio
-        const formData = await request.formData();
-        const imageFile = formData.get('image');
-        const audioFile = formData.get('audio');
-        userMessage = formData.get('message') || '';
+        // Initial request: { message, imageKeys, audioKey, timestamp? }
+        userMessage = body.message || '';
+        imageKeys = Array.isArray(body.imageKeys) ? body.imageKeys : [];
+        audioKey = body.audioKey || null;
+        timestamp = body.timestamp || localTimestamp();
+        entryId = body.entryId || genEntryId();
 
-        const content = [];
-        if (userMessage) {
-            content.push({ type: 'text', text: userMessage });
-        } else {
-            content.push({ type: 'text', text: 'Analyze this food.' });
-        }
+        // Persist a placeholder row first so a disconnect mid-LLM still leaves an entry.
+        await storage.saveEntry(
+            {
+                id: entryId,
+                status: 'analyzing',
+                timestamp,
+                user_message: userMessage,
+                items: [],
+                image_keys: imageKeys,
+                audio_key: audioKey,
+                messages: []
+            },
+            userId
+        );
 
-        if (imageFile) {
-            const arrayBuffer = await imageFile.arrayBuffer();
-            const base64Image = Base64.fromUint8Array(new Uint8Array(arrayBuffer));
-            content.push({
-                type: 'image_url',
-                image_url: { url: `data:${imageFile.type};base64,${base64Image}` }
-            });
-        }
-
-        if (audioFile) {
-            const arrayBuffer = await audioFile.arrayBuffer();
-            const base64Audio = Base64.fromUint8Array(new Uint8Array(arrayBuffer));
-            content.push({
-                type: 'input_audio',
-                input_audio: { data: base64Audio, format: 'wav' }
-            });
-        }
-
-        const systemPrompt = imageFile ? imagePrompt : textPrompt;
+        const content = await buildContentFromKeys(env, userMessage, imageKeys, audioKey);
+        const hasImage = imageKeys.length > 0;
+        const systemPrompt = hasImage ? imagePrompt : textPrompt;
         messages = [
             { role: 'system', content: systemPrompt },
             { role: 'user', content }
         ];
-        model = imageFile ? 'google/gemini-3.1-pro-preview' : 'google/gemini-3-flash-preview';
+        model = pickModel(hasImage);
     }
 
-    const responseData = await callOpenRouter(platform.env, messages, tools, 'required', model);
+    let responseData;
+    try {
+        responseData = await callOpenRouter(env, messages, tools, 'required', model);
+    } catch (err) {
+        // LLM call failed — mark the entry so the user isn't left with a stuck 'analyzing' row.
+        if (entryId) await storage.setEntryStatus(entryId, userId, 'awaiting_user').catch(() => {});
+        return json({ entryId, error: String(err.message || err) }, { status: 502 });
+    }
+
     const choice = responseData.choices[0];
     const responseMsg = choice.message;
     const toolCall = responseMsg.tool_calls?.[0];
-    reasoning = responseMsg.reasoning || responseMsg.thought || null;
-
+    const reasoning = responseMsg.reasoning || responseMsg.thought || null;
     const updatedConversation = [...messages, responseMsg];
-    const result = dispatchToolCall(toolCall, updatedConversation, userMessage);
 
-    // Attach reasoning + raw_response on the success path; harmless on rejection/clarification
-    if (result.status === 200 && result.body && !result.body.rejection && !result.body.clarification) {
-        result.body.reasoning = reasoning;
-        result.body.user_message = userMessage;
-        result.body.raw_response = JSON.stringify(responseData);
+    if (!toolCall) {
+        return json({ entryId, error: 'AI did not return a valid response.' }, { status: 502 });
     }
 
-    return json(result.body, { status: result.status });
+    const baseEntry = {
+        id: entryId,
+        timestamp,
+        user_message: userMessage,
+        image_keys: imageKeys,
+        audio_key: audioKey,
+        raw_response: JSON.stringify(responseData),
+        reasoning
+    };
+
+    if (toolCall.function.name === 'reject_input') {
+        let reason;
+        try { reason = JSON.parse(toolCall.function.arguments).reason; } catch { reason = null; }
+        // Tear down the placeholder so it doesn't litter history.
+        waitUntil(storage.deleteEntry(entryId, userId).catch(() => {}));
+        return json({
+            entryId,
+            rejection: { message: reason || "That doesn't look like food." }
+        });
+    }
+
+    if (toolCall.function.name === 'ask_clarification') {
+        let args;
+        try { args = JSON.parse(toolCall.function.arguments); } catch { args = {}; }
+        const pending_question = {
+            question: args.question || 'Could you clarify?',
+            options: Array.isArray(args.options) ? args.options : [],
+            tool_call_id: toolCall.id
+        };
+        // Persist progress: keep full convo (including images) so resume from history works.
+        await storage.saveEntry(
+            {
+                ...baseEntry,
+                status: 'awaiting_user',
+                items: [],
+                messages: updatedConversation,
+                pending_question
+            },
+            userId
+        );
+        return json({
+            entryId,
+            clarification: pending_question,
+            messages: updatedConversation
+        });
+    }
+
+    if (toolCall.function.name === 'log_meal') {
+        let args;
+        try { args = JSON.parse(toolCall.function.arguments); } catch { args = {}; }
+        const items = args.items || [];
+        const totals = totalsFromItems(items);
+        const stripped = stripBinariesFromConversation(updatedConversation, userMessage);
+
+        await storage.saveEntry(
+            {
+                ...baseEntry,
+                status: 'ready',
+                meal_title: args.meal_title,
+                items,
+                ...totals,
+                messages: stripped,
+                pending_question: null
+            },
+            userId
+        );
+
+        // Clean up pending uploads — analysis succeeded, originals no longer needed.
+        const keysToDrop = [...imageKeys, audioKey].filter(Boolean);
+        if (keysToDrop.length > 0) {
+            waitUntil(
+                Promise.all(keysToDrop.map((k) => env.IMAGES.delete(k).catch(() => {})))
+            );
+        }
+
+        return json({
+            entryId,
+            meal_title: args.meal_title,
+            items,
+            ...totals,
+            reasoning,
+            user_message: userMessage,
+            raw_response: JSON.stringify(responseData),
+            messages: stripped
+        });
+    }
+
+    return json({ entryId, error: `Unexpected tool call: ${toolCall.function.name}` }, { status: 502 });
 }

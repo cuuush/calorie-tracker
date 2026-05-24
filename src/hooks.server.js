@@ -1,14 +1,40 @@
+import { dev } from '$app/environment';
 import { Auth } from '$lib/server/auth';
 import { Storage } from '$lib/server/storage';
 import { extractSessionCookie } from '$lib/server/middleware';
 
+// During `vite dev`, event.platform is undefined because we're not running on
+// Cloudflare Workers. Pull in real bindings via wrangler's getPlatformProxy so
+// D1/R2/KV all work locally against Miniflare-backed state.
+let devPlatformPromise = null;
+async function getDevPlatform() {
+    if (!devPlatformPromise) {
+        devPlatformPromise = (async () => {
+            const { getPlatformProxy } = await import('wrangler');
+            const proxy = await getPlatformProxy({ persist: true });
+            return {
+                env: proxy.env,
+                context: proxy.ctx,
+                caches: proxy.caches,
+                cf: proxy.cf
+            };
+        })();
+    }
+    return devPlatformPromise;
+}
+
 /** @type {import('@sveltejs/kit').Handle} */
 export async function handle({ event, resolve }) {
+    if (dev && !event.platform) {
+        event.platform = await getDevPlatform();
+    }
+
     const { platform, url } = event;
 
-    // Redirect HTTP to HTTPS in production
-    const isDev = platform?.env?.DEV === 'true' || platform?.env?.DEV === true;
-    if (!isDev && url.protocol === 'http:') {
+    // Redirect HTTP to HTTPS in production. Skip on localhost and during `vite dev`
+    // so the dev workflow doesn't bounce to https://localhost which has no cert.
+    const isLocal = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+    if (!dev && !isLocal && url.protocol === 'http:') {
         return Response.redirect(url.href.replace('http:', 'https:'), 301);
     }
 

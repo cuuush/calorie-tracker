@@ -1,6 +1,7 @@
 <script>
+	import { onMount } from 'svelte';
 	import LoadingSkeleton from './LoadingSkeleton.svelte';
-	import { Trash2, MessageSquare, Clock, Send } from 'lucide-svelte';
+	import { Trash2, MessageSquare, Clock, Send, ChevronLeft, ChevronRight, Loader } from 'lucide-svelte';
 	import { toast } from '$lib/toast.svelte.js';
 	import { fetchWithRetry } from '$lib/net.js';
 
@@ -9,12 +10,14 @@
 	let expandedId = $state(null);
 	let editingChatId = $state(null);
 	let editingTimeId = $state(null);
+	let editingDate = $state(null); // YYYY-MM-DD string for the currently-editing entry
 
 	let chatInput = $state('');
 	let chatMessages = $state([]);
 	let chatLoading = $state(false);
 	let chatItemsSnapshot = $state(null);
 	let chatTitleSnapshot = $state(null);
+	let pendingQuestionEntryId = $state(null); // entry whose pending_question is showing in chat
 
 	function formatTime(ts) {
 		const d = new Date(ts);
@@ -53,7 +56,14 @@
 		editingChatId = entry.id;
 		editingTimeId = null;
 		chatInput = '';
-		chatMessages = [];
+		// Seed chat thread with the pending clarification question if there is one.
+		if (entry.pending_question) {
+			chatMessages = [{ role: 'assistant', content: entry.pending_question.question }];
+			pendingQuestionEntryId = entry.id;
+		} else {
+			chatMessages = [];
+			pendingQuestionEntryId = null;
+		}
 		chatItemsSnapshot = parseItems(entry.items);
 		chatTitleSnapshot = entry.meal_title;
 	}
@@ -64,12 +74,47 @@
 		chatMessages = [];
 		chatItemsSnapshot = null;
 		chatTitleSnapshot = null;
+		pendingQuestionEntryId = null;
 	}
 
 	function openTime(entry) {
 		editingTimeId = entry.id;
 		editingChatId = null;
 		closeChat();
+		editingDate = entry.timestamp.split('T')[0];
+	}
+
+	function shiftEditingDate(days) {
+		if (!editingDate) return;
+		const [y, m, d] = editingDate.split('-').map(Number);
+		const date = new Date(y, m - 1, d);
+		date.setDate(date.getDate() + days);
+		const yy = date.getFullYear();
+		const mm = String(date.getMonth() + 1).padStart(2, '0');
+		const dd = String(date.getDate()).padStart(2, '0');
+		editingDate = `${yy}-${mm}-${dd}`;
+	}
+
+	function fmtDateLabel(ymd) {
+		if (!ymd) return '';
+		const [y, m, d] = ymd.split('-').map(Number);
+		const date = new Date(y, m - 1, d);
+		const today = new Date();
+		const yest = new Date(); yest.setDate(today.getDate() - 1);
+		const tom = new Date(); tom.setDate(today.getDate() + 1);
+		const same = (a, b) =>
+			a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+		if (same(date, today)) return 'Today';
+		if (same(date, yest)) return 'Yesterday';
+		if (same(date, tom)) return 'Tomorrow';
+		return date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+	}
+
+	function statusBadge(status) {
+		if (status === 'analyzing') return { label: 'ANALYZING…', kind: 'analyzing' };
+		if (status === 'awaiting_user') return { label: 'ANSWER NEEDED', kind: 'awaiting' };
+		if (status === 'ready') return { label: 'UNSAVED', kind: 'unsaved' };
+		return null;
 	}
 
 	async function sendChat(entryId) {
@@ -79,29 +124,63 @@
 		chatMessages = [...chatMessages, { role: 'user', content: message }];
 		chatLoading = true;
 
+		// Find the live entry to check for a pending clarification.
+		const liveEntry = historyGroups
+			.flatMap((g) => g.entries)
+			.find((e) => e.id === entryId);
+		const pq = liveEntry?.pending_question;
+
 		try {
-			const res = await fetchWithRetry('/api/followup', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					entryId,
-					message,
-					currentItems: chatItemsSnapshot,
-					currentMealTitle: chatTitleSnapshot
-				})
-			});
-			const data = await res.json();
+			let data;
+			if (pq && pq.tool_call_id && pendingQuestionEntryId === entryId) {
+				// Continuation: answer the AI's clarification via the analyze continuation path.
+				const res = await fetchWithRetry('/api/analyze', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						entryId,
+						tool_call_id: pq.tool_call_id,
+						choice: message
+					})
+				});
+				data = await res.json();
+				pendingQuestionEntryId = null;
 
-			if (data.updatedEntry) {
-				chatItemsSnapshot = data.updatedEntry.items || chatItemsSnapshot;
-				chatTitleSnapshot = data.updatedEntry.meal_title || chatTitleSnapshot;
-			}
-			if (data.content) {
-				chatMessages = [...chatMessages, { role: 'assistant', content: data.content }];
-			}
-
-			if (data.updatedEntry) {
+				if (data.clarification) {
+					chatMessages = [...chatMessages, { role: 'assistant', content: data.clarification.question }];
+					pendingQuestionEntryId = entryId;
+				} else if (data.rejection) {
+					chatMessages = [...chatMessages, { role: 'assistant', content: data.rejection.message }];
+				} else if (data.items) {
+					chatItemsSnapshot = data.items;
+					chatTitleSnapshot = data.meal_title || chatTitleSnapshot;
+					chatMessages = [...chatMessages, { role: 'assistant', content: `Logged: ${data.meal_title}` }];
+				}
 				await onEntryUpdated?.();
+			} else {
+				const res = await fetchWithRetry('/api/followup', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						entryId,
+						message,
+						currentItems: chatItemsSnapshot,
+						currentMealTitle: chatTitleSnapshot
+					})
+				});
+				data = await res.json();
+
+				if (data.updatedEntry) {
+					chatItemsSnapshot = data.updatedEntry.items || chatItemsSnapshot;
+					chatTitleSnapshot = data.updatedEntry.meal_title || chatTitleSnapshot;
+				}
+				if (data.content) {
+					chatMessages = [...chatMessages, { role: 'assistant', content: data.content }];
+				}
+
+				if (data.updatedEntry) {
+					await onEntryUpdated?.();
+				}
 			}
 		} catch (e) {
 			console.error(e);
@@ -112,12 +191,12 @@
 	}
 
 	function setMealPeriod(entry, period) {
-		// Keep the same date, swap the hour
+		// Use the user-shifted editingDate so prev/next-day arrows are respected.
 		const periodHours = { breakfast: 8, lunch: 13, dinner: 19, snack: 22 };
 		const targetHour = periodHours[period];
 		if (targetHour === undefined) return;
 
-		const datePart = entry.timestamp.split('T')[0];
+		const datePart = editingDate || entry.timestamp.split('T')[0];
 		const newTs = `${datePart}T${String(targetHour).padStart(2, '0')}:00:00`;
 		updateTimestamp(entry.id, newTs);
 	}
@@ -158,6 +237,40 @@
 		// Convert "YYYY-MM-DDTHH:MM:SS" → "YYYY-MM-DDTHH:MM"
 		return ts ? ts.slice(0, 16) : '';
 	}
+
+	// Poll for status changes on any analyzing entries (e.g. user submitted, closed
+	// the tab, then came back to history while the worker is still running).
+	let pollTimer = null;
+	function flatEntries() {
+		return historyGroups.flatMap((g) => g.entries);
+	}
+	$effect(() => {
+		const hasAnalyzing = flatEntries().some((e) => e.status === 'analyzing');
+		if (hasAnalyzing && !pollTimer) {
+			pollTimer = setInterval(async () => {
+				const analyzing = flatEntries().filter((e) => e.status === 'analyzing');
+				if (analyzing.length === 0) {
+					clearInterval(pollTimer);
+					pollTimer = null;
+					return;
+				}
+				let anyChanged = false;
+				for (const ent of analyzing) {
+					try {
+						const res = await fetch(`/api/entry/${ent.id}`);
+						if (!res.ok) continue;
+						const fresh = await res.json();
+						if (fresh.status && fresh.status !== 'analyzing') anyChanged = true;
+					} catch { /* ignore */ }
+				}
+				if (anyChanged) await onEntryUpdated?.();
+			}, 2000);
+		} else if (!hasAnalyzing && pollTimer) {
+			clearInterval(pollTimer);
+			pollTimer = null;
+		}
+	});
+	onMount(() => () => { if (pollTimer) clearInterval(pollTimer); });
 </script>
 
 <div id="historyView">
@@ -197,14 +310,26 @@
 
 					<div class="rail">
 						{#each group.entries as entry (entry.id)}
+							{@const badge = statusBadge(entry.status)}
 							<button
 								class="meal-row"
 								class:expanded={expandedId === entry.id}
+								class:pending={!!badge}
 								onclick={() => toggleExpand(entry.id)}
 							>
 								<span class="dot"></span>
 								<span class="time">{formatTime(entry.timestamp)}</span>
-								<span class="title">{entry.meal_title || 'Meal'}</span>
+								<span class="title-wrap">
+									<span class="title">{entry.meal_title || (badge ? 'New meal' : 'Meal')}</span>
+									{#if badge}
+										<span class="status-badge {badge.kind}">
+											{#if badge.kind === 'analyzing'}
+												<span class="spin-wrap"><Loader size={10} /></span>
+											{/if}
+											{badge.label}
+										</span>
+									{/if}
+								</span>
 								<span class="macros">
 									{#if !proteinFocused}
 										<span class="cal">{Math.round(entry.total_calories)}</span>
@@ -272,6 +397,23 @@
 									{#if editingTimeId === entry.id}
 										{@const currentPeriod = getCurrentPeriod(entry)}
 										<div class="time-panel" onclick={(e) => e.stopPropagation()}>
+											<div class="date-nav">
+												<button
+													class="date-arrow"
+													onclick={() => shiftEditingDate(-1)}
+													aria-label="Previous day"
+												>
+													<ChevronLeft size={16} />
+												</button>
+												<span class="date-label">{fmtDateLabel(editingDate)}</span>
+												<button
+													class="date-arrow"
+													onclick={() => shiftEditingDate(1)}
+													aria-label="Next day"
+												>
+													<ChevronRight size={16} />
+												</button>
+											</div>
 											<div class="period-chips">
 												<button
 													class="chip"
@@ -306,7 +448,9 @@
 												<span>Custom</span>
 												<input
 													type="datetime-local"
-													value={datetimeLocalValue(entry.timestamp)}
+													value={editingDate
+														? `${editingDate}T${entry.timestamp.slice(11, 16)}`
+														: datetimeLocalValue(entry.timestamp)}
 													onchange={(e) => setCustomTime(entry, e.currentTarget.value)}
 												/>
 											</label>
@@ -528,6 +672,14 @@
 		padding-top: 0.2rem;
 	}
 
+	.title-wrap {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0.25rem;
+		min-width: 0;
+	}
+
 	.title {
 		font-size: 0.95rem;
 		color: #eee;
@@ -535,6 +687,48 @@
 		min-width: 0;
 		line-height: 1.3;
 		word-break: break-word;
+	}
+
+	.status-badge {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+		font-size: 0.55rem;
+		font-weight: 700;
+		letter-spacing: 0.1em;
+		padding: 0.15rem 0.45rem;
+		border-radius: 4px;
+		border: 1px solid #2a2a2a;
+		color: #999;
+		background: #0a0a0a;
+	}
+
+	.status-badge.analyzing {
+		color: #cfa45f;
+		border-color: #3a2f10;
+	}
+
+	.status-badge.awaiting {
+		color: #f87171;
+		border-color: #3a1414;
+	}
+
+	.status-badge.unsaved {
+		color: #facc15;
+		border-color: #3a2f10;
+	}
+
+	.spin-wrap {
+		display: inline-flex;
+		animation: hv-spin 0.9s linear infinite;
+	}
+
+	@keyframes hv-spin {
+		to { transform: rotate(360deg); }
+	}
+
+	.meal-row.pending .dot {
+		background: #facc15;
 	}
 
 	.macros {
@@ -669,6 +863,40 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.6rem;
+	}
+
+	.date-nav {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+	}
+
+	.date-arrow {
+		background: #111;
+		border: 1px solid #222;
+		color: #ddd;
+		width: 30px;
+		height: 30px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		border-radius: 5px;
+		cursor: pointer;
+		transition: all 0.15s;
+	}
+
+	.date-arrow:hover {
+		background: #1a1a1a;
+		border-color: #4ade80;
+		color: #4ade80;
+	}
+
+	.date-label {
+		font-size: 0.85rem;
+		font-weight: 600;
+		color: #eee;
+		letter-spacing: 0.02em;
 	}
 
 	.period-chips {

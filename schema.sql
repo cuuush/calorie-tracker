@@ -43,7 +43,9 @@ CREATE TABLE IF NOT EXISTS nutrition_entries (
   total_calories INTEGER,
   total_protein REAL,
   total_carbs REAL,
-  items TEXT -- Keep small JSON summary in D1
+  items TEXT, -- Keep small JSON summary in D1
+  -- 'analyzing' | 'awaiting_user' | 'ready' | 'committed'
+  status TEXT NOT NULL DEFAULT 'committed'
 );
 
 CREATE INDEX IF NOT EXISTS idx_nutrition_entries_timestamp ON nutrition_entries(timestamp DESC);

@@ -17,7 +17,7 @@ export async function GET({ params, locals }) {
 }
 
 /** @type {import('./$types').RequestHandler} */
-export async function PATCH({ params, request, locals }) {
+export async function PATCH({ params, request, locals, platform }) {
     if (!locals.user) {
         return json({ error: 'Unauthorized' }, { status: 401 });
     }
@@ -32,6 +32,13 @@ export async function PATCH({ params, request, locals }) {
 
     if (body.timestamp) entry.timestamp = body.timestamp;
     if (body.meal_title !== undefined) entry.meal_title = body.meal_title;
+    if (Array.isArray(body.items)) {
+        entry.items = body.items;
+        entry.total_calories = body.items.reduce((s, i) => s + (i.calories || 0), 0);
+        entry.total_protein = Math.round(body.items.reduce((s, i) => s + (i.protein || 0), 0));
+        entry.total_carbs = body.items.reduce((s, i) => s + (i.carbs || 0), 0);
+    }
+    if (body.status) entry.status = body.status;
 
     // saveEntry expects `messages` not `conversation_messages`; preserve them
     if (entry.conversation_messages && !entry.messages) {
@@ -39,7 +46,24 @@ export async function PATCH({ params, request, locals }) {
     }
 
     const saved = await locals.storage.saveEntry(entry, locals.user.id);
-    return json({ success: true, timestamp: saved.timestamp, meal_title: saved.meal_title });
+
+    // On commit, drop any lingering pending uploads associated with this entry.
+    if (body.status === 'committed') {
+        const keysToDrop = [...(entry.image_keys || []), entry.audio_key].filter(Boolean);
+        if (keysToDrop.length > 0 && platform?.env?.IMAGES) {
+            const cleanup = Promise.all(
+                keysToDrop.map((k) => platform.env.IMAGES.delete(k).catch(() => {}))
+            );
+            platform?.context?.waitUntil?.(cleanup);
+        }
+    }
+
+    return json({
+        success: true,
+        timestamp: saved.timestamp,
+        meal_title: saved.meal_title,
+        status: saved.status
+    });
 }
 
 /** @type {import('./$types').RequestHandler} */
