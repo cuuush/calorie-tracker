@@ -4,6 +4,7 @@
 	import { marked } from 'marked';
 	import { toast } from '$lib/toast.svelte.js';
 	import { abortableSleep } from '$lib/net.js';
+	import { buildChatHistory } from '$lib/chat-history.js';
 
 	marked.setOptions({ gfm: true, breaks: false });
 
@@ -88,9 +89,7 @@
 		const trimmed = input.trim();
 		if (!trimmed || streaming) return;
 
-		const history = messages
-			.filter((m) => m.role === 'user' || (m.role === 'assistant' && m.content))
-			.map((m) => ({ role: m.role, content: m.content }));
+		const history = buildChatHistory(messages);
 
 		messages = [
 			...messages,
