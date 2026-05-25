@@ -174,7 +174,12 @@ export async function POST({ request, locals, platform }) {
 
     const conversation = [
         { role: 'system', content: systemPrompt },
-        ...userMessages.map(m => ({ role: m.role, content: m.content }))
+        ...userMessages.map(m => {
+            const msg = { role: m.role, content: m.content };
+            if (m.tool_calls) msg.tool_calls = m.tool_calls;
+            if (m.tool_call_id) msg.tool_call_id = m.tool_call_id;
+            return msg;
+        })
     ];
 
     const encoder = new TextEncoder();
