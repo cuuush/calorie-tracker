@@ -449,7 +449,22 @@
 				<div class="bubble-row user">
 					<div class="bubble user-bubble">{m.content}</div>
 				</div>
-			{:else}
+			{:else if m.role === 'tool'}
+				<!-- skip raw tool results -->
+			{:else if m.role === 'assistant' && m.tool_calls && !m.content}
+				<div class="bubble-row assistant">
+					<div class="assistant-col">
+						<div class="tool-pills">
+							{#each m.tool_calls as tc}
+								<div class="tool-pill done">
+									<Check size={12} />
+									<span>{TOOL_LABELS[tc.function?.name] || tc.function?.name || 'tool'}</span>
+								</div>
+							{/each}
+						</div>
+					</div>
+				</div>
+			{:else if m.role === 'assistant'}
 				<div class="bubble-row assistant">
 					<div class="assistant-col">
 						{#if m.reasoning}
