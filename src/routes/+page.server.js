@@ -17,6 +17,17 @@ export async function load({ locals, cookies }) {
 		locals.storage.getStats(locals.user.id, null, tz)
 	]);
 
+	let mealPlaceholder;
+	try {
+		const hour = new Date(new Date().toLocaleString('en-US', { timeZone: tz })).getHours();
+		if (hour >= 4 && hour < 11) mealPlaceholder = "What's for breakfast?";
+		else if (hour >= 11 && hour < 16) mealPlaceholder = "What's for lunch?";
+		else if (hour >= 16 && hour < 22) mealPlaceholder = "What's for dinner?";
+		else mealPlaceholder = 'late night snack?';
+	} catch {
+		mealPlaceholder = "What's for dinner?";
+	}
+
 	return {
 		settings: settings || {},
 		stats: stats || {
@@ -27,6 +38,7 @@ export async function load({ locals, cookies }) {
 			weeklyData: [0, 0, 0, 0, 0, 0, 0],
 			weeklyProteinData: [0, 0, 0, 0, 0, 0, 0]
 		},
-		tz_used: tz
+		tz_used: tz,
+		mealPlaceholder
 	};
 }

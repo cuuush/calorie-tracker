@@ -113,7 +113,6 @@
 	function statusBadge(status) {
 		if (status === 'analyzing') return { label: 'ANALYZING…', kind: 'analyzing' };
 		if (status === 'awaiting_user') return { label: 'ANSWER NEEDED', kind: 'awaiting' };
-		if (status === 'ready') return { label: 'UNSAVED', kind: 'unsaved' };
 		return null;
 	}
 
@@ -198,27 +197,27 @@
 
 		const datePart = editingDate || entry.timestamp.split('T')[0];
 		const newTs = `${datePart}T${String(targetHour).padStart(2, '0')}:00:00`;
-		updateTimestamp(entry.id, newTs);
+		updateTimestamp(entry, newTs);
 	}
 
 	function setCustomTime(entry, value) {
 		if (!value) return;
 		// value is "YYYY-MM-DDTHH:mm" — append seconds
 		const newTs = value.length === 16 ? `${value}:00` : value;
-		updateTimestamp(entry.id, newTs);
+		updateTimestamp(entry, newTs);
 	}
 
-	async function updateTimestamp(entryId, newTimestamp) {
+	async function updateTimestamp(entry, newTimestamp) {
 		try {
-			const res = await fetchWithRetry(`/api/entry/${entryId}`, {
+			const res = await fetchWithRetry(`/api/entry/${entry.id}`, {
 				method: 'PATCH',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ timestamp: newTimestamp })
 			});
 			if (!res.ok) throw new Error('Failed');
+			entry.timestamp = newTimestamp;
 			editingTimeId = null;
-			expandedId = null;
-			await onEntryUpdated?.();
+			editingDate = null;
 		} catch (e) {
 			console.error(e);
 			toast('Could not update time.', { kind: 'error' });
@@ -713,10 +712,6 @@
 		border-color: #3a1414;
 	}
 
-	.status-badge.unsaved {
-		color: #facc15;
-		border-color: #3a2f10;
-	}
 
 	.spin-wrap {
 		display: inline-flex;
