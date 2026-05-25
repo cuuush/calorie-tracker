@@ -113,6 +113,13 @@
 		}
 	});
 
+	// Lock body scroll when chat tab is active so touch events hit
+	// the chat message list instead of scrolling the outer page.
+	$effect(() => {
+		document.body.style.overflow = currentTab === 'chat' ? 'hidden' : '';
+		return () => { document.body.style.overflow = ''; };
+	});
+
 	// Load history when switching to history tab
 	$effect(() => {
 		if (currentTab === 'history' && history.length === 0) {
