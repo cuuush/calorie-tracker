@@ -106,6 +106,7 @@
 		];
 		const lastIdx = messages.length - 1;
 		input = '';
+		if (textarea) textarea.value = '';
 		autosize();
 		streaming = true;
 		// Force scroll to bottom when user sends a message — they expect to see their own message.
@@ -286,6 +287,7 @@
 		conversationId = null;
 		showHistory = false;
 		input = '';
+		if (textarea) textarea.value = '';
 		autosize();
 		isAtBottom = true;
 	}
