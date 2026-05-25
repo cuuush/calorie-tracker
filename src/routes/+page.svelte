@@ -205,7 +205,7 @@
 		else return 'late night snack?';
 		return `What's for ${meal}?`;
 	}
-	let placeholder = $state(setDynamicPlaceholder());
+	let placeholder = $state(data.mealPlaceholder || setDynamicPlaceholder());
 
 	// --- AUDIO VISUALIZATION ---
 	function analyzeAudio() {
