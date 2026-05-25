@@ -437,9 +437,9 @@
 				<h2>Ask about your meals</h2>
 				<p>Get nutrition feedback, trends, and ideas grounded in what you actually ate today.</p>
 				<div class="intro-examples">
-					<span>"What should I eat for lunch?"</span>
-					<span>"Am I eating too much junk this week?"</span>
-					<span>"Why do I feel sluggish at 3pm?"</span>
+					<button class="intro-prompt" onclick={() => { input = 'What should I eat for lunch?'; send(); }}>What should I eat for lunch?</button>
+					<button class="intro-prompt" onclick={() => { input = 'Am I eating too much junk this week?'; send(); }}>Am I eating too much junk this week?</button>
+					<button class="intro-prompt" onclick={() => { input = 'Why do I feel sluggish at 3pm?'; send(); }}>Why do I feel sluggish at 3pm?</button>
 				</div>
 			</div>
 		{/if}
@@ -830,7 +830,7 @@
 		gap: 8px;
 		align-items: center;
 	}
-	.intro-examples span {
+	.intro-prompt {
 		font-size: 0.78rem;
 		color: #666;
 		font-style: italic;
@@ -838,6 +838,13 @@
 		background: #131313;
 		border: 1px solid #1f1f1f;
 		border-radius: 16px;
+		cursor: pointer;
+		font-family: inherit;
+		transition: border-color 0.15s, color 0.15s;
+	}
+	.intro-prompt:hover {
+		border-color: #333;
+		color: #aaa;
 	}
 
 	.bubble-row {
