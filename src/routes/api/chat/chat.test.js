@@ -230,4 +230,54 @@ describe('Chat endpoint POST', () => {
         expect(callCount).toBeGreaterThan(0);
         expect(callCount).toBeLessThanOrEqual(4);
     });
+
+    it('preserves tool_calls and tool_call_id in follow-up messages sent to OpenRouter', async () => {
+        let capturedBody = null;
+        globalThis.fetch = async (url, opts) => {
+            if (typeof url === 'string' && url.includes('openrouter.ai')) {
+                capturedBody = JSON.parse(opts.body);
+                const body = createStreamChunks(
+                    createTextStreamChunks('You averaged 600 cal last week.')
+                );
+                return new Response(body, {
+                    status: 200,
+                    headers: { 'Content-Type': 'text/event-stream' }
+                });
+            }
+            throw new Error(`Unexpected fetch to: ${url}`);
+        };
+
+        const { POST } = await import('./+server.js');
+        const event = createMockEvent({
+            messages: [
+                { role: 'user', content: 'Weekly summary' },
+                {
+                    role: 'assistant',
+                    content: null,
+                    tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'get_meals_last_7_days', arguments: '{}' } }]
+                },
+                { role: 'tool', tool_call_id: 'call_1', content: '{"entries":[{"date":"2026-05-20","meal_title":"Lunch","calories":600}],"count":1}' },
+                { role: 'assistant', content: 'You had 600 cal on Tuesday.' },
+                { role: 'user', content: 'What about protein?' }
+            ],
+            clientNow: '2026-05-24T12:00:00',
+            timezone: 'America/New_York'
+        });
+
+        const response = await POST(event);
+        expect(response.status).toBe(200);
+        await response.text();
+
+        expect(capturedBody).not.toBeNull();
+        const msgs = capturedBody.messages;
+
+        const toolCallMsg = msgs.find(m => m.tool_calls);
+        expect(toolCallMsg).toBeDefined();
+        expect(toolCallMsg.tool_calls[0].function.name).toBe('get_meals_last_7_days');
+
+        const toolResultMsg = msgs.find(m => m.role === 'tool');
+        expect(toolResultMsg).toBeDefined();
+        expect(toolResultMsg.tool_call_id).toBe('call_1');
+        expect(toolResultMsg.content).toContain('600');
+    });
 });
