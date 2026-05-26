@@ -52,3 +52,23 @@ export async function POST({ request, locals, platform, getClientAddress }) {
 
     return json({ key, kind, mime, size: file.size });
 }
+
+/** @type {import('./$types').RequestHandler} */
+export async function DELETE({ request, locals, platform }) {
+    if (!locals.user) {
+        return json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const { key } = await request.json();
+    if (!key || typeof key !== 'string') {
+        return json({ error: 'Missing key' }, { status: 400 });
+    }
+
+    const prefix = `pending/${locals.user.id}/`;
+    if (!key.startsWith(prefix)) {
+        return json({ error: 'Forbidden' }, { status: 403 });
+    }
+
+    await platform.env.IMAGES.delete(key);
+    return json({ ok: true });
+}

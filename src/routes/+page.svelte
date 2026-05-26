@@ -242,6 +242,13 @@
 				mediaRecorder.ondataavailable = (e) => audioChunks.push(e.data);
 				mediaRecorder.onstop = async () => {
 					const blob = new Blob(audioChunks, { type: 'audio/wav' });
+					if (selectedAudio?.key) {
+						fetch('/api/upload', {
+							method: 'DELETE',
+							headers: { 'Content-Type': 'application/json' },
+							body: JSON.stringify({ key: selectedAudio.key })
+						}).catch(() => {});
+					}
 					selectedAudio = { blob };
 					stopMicStream();
 				};
@@ -286,6 +293,13 @@
 				const originalOnStop = mediaRecorder.onstop;
 				mediaRecorder.onstop = async () => {
 					const blob = new Blob(audioChunks, { type: 'audio/wav' });
+					if (selectedAudio?.key) {
+						fetch('/api/upload', {
+							method: 'DELETE',
+							headers: { 'Content-Type': 'application/json' },
+							body: JSON.stringify({ key: selectedAudio.key })
+						}).catch(() => {});
+					}
 					selectedAudio = { blob };
 					if (originalOnStop) await originalOnStop();
 					resolve();

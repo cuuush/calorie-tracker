@@ -93,7 +93,25 @@
 	function removeImage(id) {
 		const found = selectedImages.find((s) => s.id === id);
 		if (found?.thumb) URL.revokeObjectURL(found.thumb);
+		if (found?.key) {
+			fetch('/api/upload', {
+				method: 'DELETE',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ key: found.key })
+			}).catch(() => {});
+		}
 		selectedImages = selectedImages.filter((s) => s.id !== id);
+	}
+
+	function removeAudio() {
+		if (selectedAudio?.key) {
+			fetch('/api/upload', {
+				method: 'DELETE',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ key: selectedAudio.key })
+			}).catch(() => {});
+		}
+		selectedAudio = null;
 	}
 
 	// Upload audio as soon as the parent hands it to us (after recording stops).
@@ -301,7 +319,7 @@
 					UPLOADING {Math.round((selectedAudio.progress || 0) * 100)}%
 				{/if}
 			</span>
-			<button class="clear-btn" onclick={() => (selectedAudio = null)} title="Remove audio"
+			<button class="clear-btn" onclick={removeAudio} title="Remove audio"
 				>&times;</button
 			>
 		</div>
