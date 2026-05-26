@@ -39,6 +39,8 @@ SvelteKit + Cloudflare Workers app for tracking food intake with AI-powered meal
 
 ## Testing
 
+- **Every new feature, endpoint, or behavioral change must include tests.** Cover the happy path plus at least one edge case (invalid input, missing data, auth boundary). Bug fixes should add a regression test that would have caught the bug. If something is genuinely untestable (e.g. pure UI animation), note why in the PR — but server logic, utilities, and data flows are always testable.
+- **Run `npm run test:unit` before pushing** and ensure all tests pass. Don't leave broken or skipped tests behind.
 - **Unit/integration**: Vitest (`npm run test:unit`). Tests live alongside source as `*.test.js`.
 - **E2E**: Playwright (`npm test` runs both).
 - **Real Cloudflare bindings**: Tests use `getPlatformProxy({ persist: false })` from `wrangler` for real D1/R2/KV backed by in-memory Miniflare. No hand-rolled mocks for storage.
