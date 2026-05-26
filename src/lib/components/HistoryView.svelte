@@ -575,14 +575,13 @@
 										<div class="split-panel" onclick={(e) => e.stopPropagation()}>
 											<span class="split-label">MOVE HOW MUCH?</span>
 											<div class="split-chips">
-												{@const cal = Math.round(entry.total_calories)}
 												<button
 													class="chip"
 													class:active={splitFraction === 1/3}
 													onclick={(e) => pickSplitFraction(entry, 1/3, e)}
 												>
 													<span>1/3</span>
-													<span class="chip-time">{Math.round(cal / 3)} cal</span>
+													<span class="chip-time">{Math.round(entry.total_calories / 3)} cal</span>
 												</button>
 												<button
 													class="chip"
@@ -590,7 +589,7 @@
 													onclick={(e) => pickSplitFraction(entry, 0.5, e)}
 												>
 													<span>1/2</span>
-													<span class="chip-time">{Math.round(cal * 0.5)} cal</span>
+													<span class="chip-time">{Math.round(entry.total_calories * 0.5)} cal</span>
 												</button>
 												<button
 													class="chip"
@@ -598,7 +597,7 @@
 													onclick={(e) => pickSplitFraction(entry, 2/3, e)}
 												>
 													<span>2/3</span>
-													<span class="chip-time">{Math.round(cal * 2 / 3)} cal</span>
+													<span class="chip-time">{Math.round(entry.total_calories * 2 / 3)} cal</span>
 												</button>
 											</div>
 
