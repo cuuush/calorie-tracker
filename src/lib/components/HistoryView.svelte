@@ -1,9 +1,10 @@
 <script>
 	import { onMount } from 'svelte';
 	import LoadingSkeleton from './LoadingSkeleton.svelte';
-	import { Trash2, MessageSquare, Clock, Send, ChevronLeft, ChevronRight, Loader } from 'lucide-svelte';
+	import { Trash2, MessageSquare, Clock, Send, ChevronLeft, ChevronRight, Loader, Copy, Split } from 'lucide-svelte';
 	import { toast } from '$lib/toast.svelte.js';
 	import { fetchWithRetry } from '$lib/net.js';
+	import { copyEntry, splitEntry } from '$lib/entry-actions.js';
 
 	let { historyGroups, historyLoading, proteinFocused, onDeleteEntry, onEntryUpdated } = $props();
 
@@ -17,7 +18,13 @@
 	let chatLoading = $state(false);
 	let chatItemsSnapshot = $state(null);
 	let chatTitleSnapshot = $state(null);
-	let pendingQuestionEntryId = $state(null); // entry whose pending_question is showing in chat
+	let pendingQuestionEntryId = $state(null);
+	let copyingTimeId = $state(null);
+	let copyDate = $state(null);
+	let splittingId = $state(null);
+	let splitFraction = $state(null);
+	let splitDate = $state(null);
+	let actionBusy = $state(false);
 
 	function formatTime(ts) {
 		const d = new Date(ts);
@@ -187,6 +194,123 @@
 		} finally {
 			chatLoading = false;
 		}
+	}
+
+	function openCopyTime(entry, e) {
+		e?.stopPropagation();
+		if (copyingTimeId === entry.id) {
+			copyingTimeId = null;
+			copyDate = null;
+			return;
+		}
+		copyingTimeId = entry.id;
+		copyDate = entry.timestamp.split('T')[0];
+		splittingId = null;
+		splitFraction = null;
+		splitDate = null;
+	}
+
+	function shiftCopyDate(days) {
+		if (!copyDate) return;
+		const [y, m, d] = copyDate.split('-').map(Number);
+		const date = new Date(y, m - 1, d);
+		date.setDate(date.getDate() + days);
+		copyDate = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+	}
+
+	async function executeCopy(entry, timestamp) {
+		if (actionBusy) return;
+		actionBusy = true;
+		try {
+			await copyEntry(entry, timestamp);
+			toast('Entry copied', { kind: 'success' });
+			copyingTimeId = null;
+			copyDate = null;
+			await onEntryUpdated?.();
+		} catch (err) {
+			console.error(err);
+			toast('Could not copy entry.', { kind: 'error' });
+		} finally {
+			actionBusy = false;
+		}
+	}
+
+	function setCopyPeriod(entry, period) {
+		const periodHours = { breakfast: 8, lunch: 13, dinner: 19, snack: 22 };
+		const targetHour = periodHours[period];
+		if (targetHour === undefined) return;
+		const datePart = copyDate || entry.timestamp.split('T')[0];
+		const ts = `${datePart}T${String(targetHour).padStart(2, '0')}:00:00`;
+		executeCopy(entry, ts);
+	}
+
+	function setCopyCustom(entry, value) {
+		if (!value) return;
+		const ts = value.length === 16 ? `${value}:00` : value;
+		executeCopy(entry, ts);
+	}
+
+	function toggleSplit(entryId, e) {
+		e?.stopPropagation();
+		if (splittingId === entryId) {
+			splittingId = null;
+			splitFraction = null;
+			splitDate = null;
+		} else {
+			splittingId = entryId;
+			splitFraction = null;
+			splitDate = null;
+			copyingTimeId = null;
+			copyDate = null;
+		}
+	}
+
+	function pickSplitFraction(entry, frac, e) {
+		e?.stopPropagation();
+		splitFraction = frac;
+		splitDate = entry.timestamp.split('T')[0];
+	}
+
+	function shiftSplitDate(days) {
+		if (!splitDate) return;
+		const [y, m, d] = splitDate.split('-').map(Number);
+		const date = new Date(y, m - 1, d);
+		date.setDate(date.getDate() + days);
+		splitDate = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+	}
+
+	async function executeSplit(entry, timestamp) {
+		if (actionBusy) return;
+		actionBusy = true;
+		try {
+			await splitEntry(entry, splitFraction, timestamp);
+			const label = splitFraction === 0.5 ? '1/2' : splitFraction < 0.34 ? '1/3' : '2/3';
+			toast(`Moved ${label} to new entry`, { kind: 'success' });
+			splittingId = null;
+			splitFraction = null;
+			splitDate = null;
+			await onEntryUpdated?.();
+		} catch (err) {
+			console.error(err);
+			toast('Could not split entry.', { kind: 'error' });
+		} finally {
+			actionBusy = false;
+		}
+	}
+
+	function setSplitPeriod(entry, period) {
+		const periodHours = { breakfast: 8, lunch: 13, dinner: 19, snack: 22 };
+		const targetHour = periodHours[period];
+		if (targetHour === undefined) return;
+		const datePart = splitDate || entry.timestamp.split('T')[0];
+		const ts = `${datePart}T${String(targetHour).padStart(2, '0')}:00:00`;
+		executeSplit(entry, ts);
+	}
+
+	function setSplitCustom(entry, value) {
+		if (!value) return;
+		const ts = value.length === 16 ? `${value}:00` : value;
+		executeSplit(entry, ts);
 	}
 
 	function setMealPeriod(entry, period) {
@@ -387,11 +511,133 @@
 											<Clock size={13} />
 											CHANGE TIME
 										</button>
-										<button class="mini-btn danger" onclick={(e) => deleteMeal(entry.id, e)}>
-											<Trash2 size={13} />
-											DELETE
-										</button>
+										<button
+										class="mini-btn"
+										class:active={copyingTimeId === entry.id}
+										onclick={(e) => openCopyTime(entry, e)}
+									>
+										<Copy size={13} />
+										COPY
+									</button>
+									<button
+										class="mini-btn"
+										class:active={splittingId === entry.id}
+										onclick={(e) => toggleSplit(entry.id, e)}
+									>
+										<Split size={13} />
+										SPLIT
+									</button>
+									<button class="mini-btn danger" onclick={(e) => deleteMeal(entry.id, e)}>
+										<Trash2 size={13} />
+										DELETE
+									</button>
 									</div>
+
+									{#if copyingTimeId === entry.id}
+										<div class="time-panel" onclick={(e) => e.stopPropagation()}>
+											<span class="split-label">COPY TO</span>
+											<div class="date-nav">
+												<button class="date-arrow" onclick={() => shiftCopyDate(-1)} aria-label="Previous day">
+													<ChevronLeft size={16} />
+												</button>
+												<span class="date-label">{fmtDateLabel(copyDate)}</span>
+												<button class="date-arrow" onclick={() => shiftCopyDate(1)} aria-label="Next day">
+													<ChevronRight size={16} />
+												</button>
+											</div>
+											<div class="period-chips">
+												<button class="chip" onclick={() => setCopyPeriod(entry, 'breakfast')} disabled={actionBusy}>
+													Breakfast<span class="chip-time">8:00am</span>
+												</button>
+												<button class="chip" onclick={() => setCopyPeriod(entry, 'lunch')} disabled={actionBusy}>
+													Lunch<span class="chip-time">1:00pm</span>
+												</button>
+												<button class="chip" onclick={() => setCopyPeriod(entry, 'dinner')} disabled={actionBusy}>
+													Dinner<span class="chip-time">7:00pm</span>
+												</button>
+												<button class="chip" onclick={() => setCopyPeriod(entry, 'snack')} disabled={actionBusy}>
+													Snack<span class="chip-time">10:00pm</span>
+												</button>
+											</div>
+											<label class="custom-time">
+												<span>Custom</span>
+												<input
+													type="datetime-local"
+													value={copyDate ? `${copyDate}T${entry.timestamp.slice(11, 16)}` : datetimeLocalValue(entry.timestamp)}
+													onchange={(e) => setCopyCustom(entry, e.currentTarget.value)}
+													disabled={actionBusy}
+												/>
+											</label>
+										</div>
+									{/if}
+
+									{#if splittingId === entry.id}
+										<div class="split-panel" onclick={(e) => e.stopPropagation()}>
+											<span class="split-label">MOVE HOW MUCH?</span>
+											<div class="split-chips">
+												<button
+													class="chip"
+													class:active={splitFraction === 1/3}
+													onclick={(e) => pickSplitFraction(entry, 1/3, e)}
+												>
+													<span>1/3</span>
+													<span class="chip-time">{Math.round(entry.total_calories / 3)} cal</span>
+												</button>
+												<button
+													class="chip"
+													class:active={splitFraction === 0.5}
+													onclick={(e) => pickSplitFraction(entry, 0.5, e)}
+												>
+													<span>1/2</span>
+													<span class="chip-time">{Math.round(entry.total_calories * 0.5)} cal</span>
+												</button>
+												<button
+													class="chip"
+													class:active={splitFraction === 2/3}
+													onclick={(e) => pickSplitFraction(entry, 2/3, e)}
+												>
+													<span>2/3</span>
+													<span class="chip-time">{Math.round(entry.total_calories * 2 / 3)} cal</span>
+												</button>
+											</div>
+
+											{#if splitFraction != null}
+												<span class="split-label" style="margin-top: 0.3rem">MOVE TO</span>
+												<div class="date-nav">
+													<button class="date-arrow" onclick={() => shiftSplitDate(-1)} aria-label="Previous day">
+														<ChevronLeft size={16} />
+													</button>
+													<span class="date-label">{fmtDateLabel(splitDate)}</span>
+													<button class="date-arrow" onclick={() => shiftSplitDate(1)} aria-label="Next day">
+														<ChevronRight size={16} />
+													</button>
+												</div>
+												<div class="period-chips">
+													<button class="chip" onclick={() => setSplitPeriod(entry, 'breakfast')} disabled={actionBusy}>
+														Breakfast<span class="chip-time">8:00am</span>
+													</button>
+													<button class="chip" onclick={() => setSplitPeriod(entry, 'lunch')} disabled={actionBusy}>
+														Lunch<span class="chip-time">1:00pm</span>
+													</button>
+													<button class="chip" onclick={() => setSplitPeriod(entry, 'dinner')} disabled={actionBusy}>
+														Dinner<span class="chip-time">7:00pm</span>
+													</button>
+													<button class="chip" onclick={() => setSplitPeriod(entry, 'snack')} disabled={actionBusy}>
+														Snack<span class="chip-time">10:00pm</span>
+													</button>
+												</div>
+												<label class="custom-time">
+													<span>Custom</span>
+													<input
+														type="datetime-local"
+														value={splitDate ? `${splitDate}T${entry.timestamp.slice(11, 16)}` : datetimeLocalValue(entry.timestamp)}
+														onchange={(e) => setSplitCustom(entry, e.currentTarget.value)}
+														disabled={actionBusy}
+													/>
+												</label>
+											{/if}
+										</div>
+									{/if}
 
 									{#if editingTimeId === entry.id}
 										{@const currentPeriod = getCurrentPeriod(entry)}
@@ -847,6 +1093,30 @@
 		background: #ff4444;
 		color: #000;
 		border-color: #ff4444;
+	}
+
+	.split-panel {
+		margin-top: 0.4rem;
+		padding: 0.6rem;
+		background: #0a0a0a;
+		border: 1px solid #1c1c1c;
+		border-radius: 6px;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.split-label {
+		font-size: 0.6rem;
+		font-weight: 700;
+		letter-spacing: 0.12em;
+		color: #666;
+	}
+
+	.split-chips {
+		display: grid;
+		grid-template-columns: 1fr 1fr 1fr;
+		gap: 0.4rem;
 	}
 
 	.time-panel {
