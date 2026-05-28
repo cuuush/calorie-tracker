@@ -350,31 +350,6 @@ export class Storage {
         return true;
     }
 
-    async cleanupPendingUploads(maxAgeMs = 24 * 60 * 60 * 1000) {
-        const cutoff = new Date(Date.now() - maxAgeMs);
-        let cursor = undefined;
-        let deleted = 0;
-
-        do {
-            const listed = await this.images.list({
-                prefix: 'pending/',
-                cursor,
-                limit: 500
-            });
-
-            for (const obj of listed.objects) {
-                if (obj.uploaded < cutoff) {
-                    await this.images.delete(obj.key);
-                    deleted++;
-                }
-            }
-
-            cursor = listed.truncated ? listed.cursor : undefined;
-        } while (cursor);
-
-        return deleted;
-    }
-
     async getStats(userId, clientDate = null, tz = 'UTC') {
         if (!this.db) return null;
 

@@ -186,35 +186,6 @@ describe('Storage.getUserSettings with KV caching', () => {
     });
 });
 
-describe('Storage.cleanupPendingUploads', () => {
-    it('deletes pending uploads older than the cutoff', async () => {
-        await proxy.env.IMAGES.put('pending/user-a/old-image.jpeg', 'old-data');
-        await proxy.env.IMAGES.put('pending/user-b/old-audio.wav', 'old-audio');
-        await proxy.env.IMAGES.put('pending/user-a/fresh-image.png', 'fresh-data');
-
-        // All objects were just created (age ~0), so a 24h cutoff deletes nothing
-        const deletedNone = await storage.cleanupPendingUploads(24 * 60 * 60 * 1000);
-        expect(deletedNone).toBe(0);
-
-        // With maxAge = 0ms, everything older than "now" qualifies
-        const deletedAll = await storage.cleanupPendingUploads(0);
-        expect(deletedAll).toBe(3);
-
-        const remaining = await proxy.env.IMAGES.list({ prefix: 'pending/' });
-        expect(remaining.objects).toHaveLength(0);
-    });
-
-    it('does not touch non-pending keys', async () => {
-        await proxy.env.IMAGES.put('entry/some-entry.json', '{}');
-        await proxy.env.IMAGES.put('pending/user-a/old.jpeg', 'data');
-
-        await storage.cleanupPendingUploads(0);
-
-        const entryObj = await proxy.env.IMAGES.get('entry/some-entry.json');
-        expect(entryObj).not.toBeNull();
-    });
-});
-
 describe('Storage.deleteEntry', () => {
     it('removes entry from D1 and R2', async () => {
         const entry = {
