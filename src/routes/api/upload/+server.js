@@ -50,11 +50,9 @@ export async function POST({ request, locals, platform, getClientAddress }) {
         httpMetadata: { contentType: mime }
     });
 
-    // Opportunistic safety-net: sweep this user's stale pending uploads (>24h old)
-    // that the immediate client-side DELETE missed (tab-close, network failure, crash).
-    const sweep = locals.storage.sweepUserPendingUploads(locals.user.id).catch(() => {});
-    platform?.context?.waitUntil?.(sweep);
-
+    // Stale pending uploads (client-side DELETE missed due to tab-close, network
+    // failure, crash) are reaped by the R2 lifecycle rule on the `pending/` prefix —
+    // see wrangler.toml. No in-band sweep needed.
     return json({ key, kind, mime, size: file.size });
 }
 

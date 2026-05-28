@@ -186,42 +186,6 @@ describe('Storage.getUserSettings with KV caching', () => {
     });
 });
 
-describe('Storage.sweepUserPendingUploads', () => {
-    it('deletes only this user\'s pending uploads older than the cutoff', async () => {
-        await proxy.env.IMAGES.put(`pending/${TEST_USER_ID}/old-1.jpeg`, 'old');
-        await proxy.env.IMAGES.put(`pending/${TEST_USER_ID}/old-2.wav`, 'old');
-        await proxy.env.IMAGES.put('pending/other-user/old.jpeg', 'other');
-        await proxy.env.IMAGES.put('entry/some-entry.json', '{}');
-
-        // With maxAge=0ms, everything older than "now" qualifies
-        const deleted = await storage.sweepUserPendingUploads(TEST_USER_ID, 0);
-        expect(deleted).toBe(2);
-
-        // Other user's pending file is untouched
-        const otherUserFile = await proxy.env.IMAGES.get('pending/other-user/old.jpeg');
-        expect(otherUserFile).not.toBeNull();
-
-        // Entry blob is untouched
-        const entryFile = await proxy.env.IMAGES.get('entry/some-entry.json');
-        expect(entryFile).not.toBeNull();
-    });
-
-    it('does not delete files younger than the cutoff', async () => {
-        await proxy.env.IMAGES.put(`pending/${TEST_USER_ID}/fresh.jpeg`, 'fresh');
-
-        // Default 24h cutoff — file just uploaded so age ~0
-        const deleted = await storage.sweepUserPendingUploads(TEST_USER_ID);
-        expect(deleted).toBe(0);
-
-        const stillThere = await proxy.env.IMAGES.get(`pending/${TEST_USER_ID}/fresh.jpeg`);
-        expect(stillThere).not.toBeNull();
-    });
-
-    it('throws without userId', async () => {
-        await expect(storage.sweepUserPendingUploads()).rejects.toThrow('userId is required');
-    });
-});
-
 describe('Storage.deleteEntry', () => {
     it('removes entry from D1 and R2', async () => {
         const entry = {

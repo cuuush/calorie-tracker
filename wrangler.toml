@@ -15,6 +15,12 @@ database_name = "nutrition-db"
 database_id = "e9430bec-7af6-47aa-983b-10b0959f1f38"
 
 # R2 Bucket for food images
+# Abandoned uploads under the `pending/` prefix are reaped automatically by an R2
+# object-lifecycle rule (declarative, server-side, applies to every user — no app
+# code or cron). R2 lifecycle rules can't be expressed in wrangler.toml yet, so
+# (re)create the rule with:
+#   wrangler r2 bucket lifecycle add nutrition-images cleanup-pending \
+#     pending/ --expire-days 1
 [[r2_buckets]]
 binding = "IMAGES"
 bucket_name = "nutrition-images"
