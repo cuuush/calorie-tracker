@@ -350,6 +350,20 @@ export class Storage {
         return true;
     }
 
+    async sweepUserPendingUploads(userId, maxAgeMs = 24 * 60 * 60 * 1000) {
+        if (!userId) throw new Error('userId is required');
+        const cutoff = new Date(Date.now() - maxAgeMs);
+        const listed = await this.images.list({ prefix: `pending/${userId}/`, limit: 200 });
+        let deleted = 0;
+        for (const obj of listed.objects) {
+            if (obj.uploaded < cutoff) {
+                await this.images.delete(obj.key);
+                deleted++;
+            }
+        }
+        return deleted;
+    }
+
     async getStats(userId, clientDate = null, tz = 'UTC') {
         if (!this.db) return null;
 

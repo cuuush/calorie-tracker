@@ -28,7 +28,8 @@ function createPostEvent(file, user = { id: TEST_USER_ID, email: TEST_USER_EMAIL
         form.append('file', file);
     }
 
-    return {
+    const waitUntilPromises = [];
+    const event = {
         request: new Request('http://localhost/api/upload', {
             method: 'POST',
             body: form
@@ -38,10 +39,13 @@ function createPostEvent(file, user = { id: TEST_USER_ID, email: TEST_USER_EMAIL
             storage
         },
         platform: {
-            env: { ...proxy.env }
+            env: { ...proxy.env },
+            context: { waitUntil: (p) => waitUntilPromises.push(p) }
         },
-        getClientAddress: () => '127.0.0.1'
+        getClientAddress: () => '127.0.0.1',
+        waitUntilPromises
     };
+    return event;
 }
 
 function createDeleteEvent(body, user = { id: TEST_USER_ID, email: TEST_USER_EMAIL }) {
@@ -196,6 +200,29 @@ describe('Upload POST', () => {
 
         const response = await POST(event);
         expect(response.status).toBe(200);
+    });
+
+    it('opportunistically sweeps this user\'s stale pending uploads via waitUntil', async () => {
+        // Seed a stale pending file for this user (older than 24h cutoff would be impossible
+        // to set on R2 directly via timestamp, so we use maxAgeMs=0 via the storage method...
+        // but the endpoint hardcodes 24h. Instead, seed and rely on the fact that fresh files
+        // should NOT be swept). Then verify the endpoint enqueues a sweep at all.
+        await proxy.env.IMAGES.put(`pending/${TEST_USER_ID}/abandoned.jpeg`, 'old');
+
+        const { POST } = await import('./+server.js');
+        const file = new File([new Uint8Array(100)], 'new.jpg', { type: 'image/jpeg' });
+        const event = createPostEvent(file);
+
+        const response = await POST(event);
+        expect(response.status).toBe(200);
+
+        // Endpoint scheduled exactly one sweep promise via waitUntil
+        expect(event.waitUntilPromises).toHaveLength(1);
+        await Promise.all(event.waitUntilPromises);
+
+        // Fresh files (both the seeded one and the just-uploaded one) survive 24h cutoff
+        const listed = await proxy.env.IMAGES.list({ prefix: `pending/${TEST_USER_ID}/` });
+        expect(listed.objects.length).toBe(2);
     });
 });
 
