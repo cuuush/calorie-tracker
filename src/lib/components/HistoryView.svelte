@@ -62,6 +62,12 @@
 	function openChat(entry) {
 		editingChatId = entry.id;
 		editingTimeId = null;
+		editingDate = null;
+		copyingTimeId = null;
+		copyDate = null;
+		splittingId = null;
+		splitFraction = null;
+		splitDate = null;
 		chatInput = '';
 		// Seed chat thread with the pending clarification question if there is one.
 		if (entry.pending_question) {
@@ -88,6 +94,11 @@
 		editingTimeId = entry.id;
 		editingChatId = null;
 		closeChat();
+		copyingTimeId = null;
+		copyDate = null;
+		splittingId = null;
+		splitFraction = null;
+		splitDate = null;
 		editingDate = entry.timestamp.split('T')[0];
 	}
 
@@ -208,6 +219,8 @@
 		splittingId = null;
 		splitFraction = null;
 		splitDate = null;
+		editingTimeId = null;
+		editingDate = null;
 	}
 
 	function shiftCopyDate(days) {
@@ -262,6 +275,8 @@
 			splitDate = null;
 			copyingTimeId = null;
 			copyDate = null;
+			editingTimeId = null;
+			editingDate = null;
 		}
 	}
 
