@@ -50,6 +50,11 @@ export async function POST({ request, locals, platform, getClientAddress }) {
         httpMetadata: { contentType: mime }
     });
 
+    // Opportunistic safety-net: sweep this user's stale pending uploads (>24h old)
+    // that the immediate client-side DELETE missed (tab-close, network failure, crash).
+    const sweep = locals.storage.sweepUserPendingUploads(locals.user.id).catch(() => {});
+    platform?.context?.waitUntil?.(sweep);
+
     return json({ key, kind, mime, size: file.size });
 }
 

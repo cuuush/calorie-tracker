@@ -350,28 +350,17 @@ export class Storage {
         return true;
     }
 
-    async cleanupPendingUploads(maxAgeMs = 24 * 60 * 60 * 1000) {
+    async sweepUserPendingUploads(userId, maxAgeMs = 24 * 60 * 60 * 1000) {
+        if (!userId) throw new Error('userId is required');
         const cutoff = new Date(Date.now() - maxAgeMs);
-        let cursor = undefined;
+        const listed = await this.images.list({ prefix: `pending/${userId}/`, limit: 200 });
         let deleted = 0;
-
-        do {
-            const listed = await this.images.list({
-                prefix: 'pending/',
-                cursor,
-                limit: 500
-            });
-
-            for (const obj of listed.objects) {
-                if (obj.uploaded < cutoff) {
-                    await this.images.delete(obj.key);
-                    deleted++;
-                }
+        for (const obj of listed.objects) {
+            if (obj.uploaded < cutoff) {
+                await this.images.delete(obj.key);
+                deleted++;
             }
-
-            cursor = listed.truncated ? listed.cursor : undefined;
-        } while (cursor);
-
+        }
         return deleted;
     }
 
